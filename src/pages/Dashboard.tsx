@@ -15,9 +15,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { signOut, user } = useAuth();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -34,7 +36,9 @@ const Dashboard = () => {
     });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut();
+    toast.success('Signed out successfully');
     navigate('/');
   };
 
@@ -63,6 +67,12 @@ const Dashboard = () => {
           </div>
 
           <div className="flex items-center gap-4">
+            {user && (
+              <span className="text-sm text-muted-foreground hidden sm:block">
+                {user.email}
+              </span>
+            )}
+            
             <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
               <DialogTrigger asChild>
                 <Button variant="glow">
@@ -78,7 +88,7 @@ const Dashboard = () => {
               </DialogContent>
             </Dialog>
 
-            <Button variant="ghost" size="icon" onClick={handleLogout}>
+            <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
               <LogOut className="w-5 h-5" />
             </Button>
           </div>

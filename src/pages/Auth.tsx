@@ -1,21 +1,108 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useNavigate } from 'react-router-dom';
-import { Cpu, ArrowRight, Zap, FileText, Database } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Cpu, ArrowRight, Zap, FileText, Database, Loader2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import { z } from 'zod';
+
+const authSchema = z.object({
+  email: z.string().email({ message: 'Please enter a valid email address' }),
+  password: z.string().min(6, { message: 'Password must be at least 6 characters' }),
+});
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  
   const navigate = useNavigate();
+  const location = useLocation();
+  const { signIn, signUp, user, isLoading } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (user && !isLoading) {
+      navigate(from, { replace: true });
+    }
+  }, [user, isLoading, navigate, from]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Mock authentication - navigate to dashboard
-    navigate('/dashboard');
+    setErrors({});
+
+    // Validate inputs
+    const validation = authSchema.safeParse({ email, password });
+    if (!validation.success) {
+      const fieldErrors: { email?: string; password?: string } = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0] === 'email') fieldErrors.email = err.message;
+        if (err.path[0] === 'password') fieldErrors.password = err.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      if (isLogin) {
+        const { error } = await signIn(email, password);
+        if (error) {
+          if (error.message.includes('Invalid login credentials')) {
+            toast.error('Invalid credentials', {
+              description: 'Please check your email and password.',
+            });
+          } else {
+            toast.error('Sign in failed', {
+              description: error.message,
+            });
+          }
+        } else {
+          toast.success('Welcome back!');
+          navigate(from, { replace: true });
+        }
+      } else {
+        const { error } = await signUp(email, password);
+        if (error) {
+          if (error.message.includes('already registered')) {
+            toast.error('Account exists', {
+              description: 'This email is already registered. Try signing in instead.',
+            });
+          } else {
+            toast.error('Sign up failed', {
+              description: error.message,
+            });
+          }
+        } else {
+          toast.success('Account created!', {
+            description: 'You can now access your dashboard.',
+          });
+          navigate(from, { replace: true });
+        }
+      }
+    } catch (err) {
+      toast.error('Something went wrong', {
+        description: 'Please try again later.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -95,8 +182,12 @@ const Auth = () => {
                   placeholder="engineer@company.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="h-12 bg-secondary border-border focus:border-primary focus:ring-primary"
+                  className={`h-12 bg-secondary border-border focus:border-primary focus:ring-primary ${errors.email ? 'border-destructive' : ''}`}
+                  disabled={isSubmitting}
                 />
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -107,21 +198,26 @@ const Auth = () => {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 bg-secondary border-border focus:border-primary focus:ring-primary"
+                  className={`h-12 bg-secondary border-border focus:border-primary focus:ring-primary ${errors.password ? 'border-destructive' : ''}`}
+                  disabled={isSubmitting}
                 />
+                {errors.password && (
+                  <p className="text-sm text-destructive">{errors.password}</p>
+                )}
               </div>
 
-              {isLogin && (
-                <div className="text-right">
-                  <button type="button" className="text-sm text-primary hover:underline">
-                    Forgot password?
-                  </button>
-                </div>
-              )}
-
-              <Button type="submit" variant="glow" size="xl" className="w-full">
-                {isLogin ? 'Sign in' : 'Create account'}
-                <ArrowRight className="w-5 h-5" />
+              <Button type="submit" variant="glow" size="xl" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    {isLogin ? 'Signing in...' : 'Creating account...'}
+                  </>
+                ) : (
+                  <>
+                    {isLogin ? 'Sign in' : 'Create account'}
+                    <ArrowRight className="w-5 h-5" />
+                  </>
+                )}
               </Button>
             </form>
 
@@ -130,8 +226,12 @@ const Auth = () => {
                 {isLogin ? "Don't have an account?" : 'Already have an account?'}
                 <button
                   type="button"
-                  onClick={() => setIsLogin(!isLogin)}
+                  onClick={() => {
+                    setIsLogin(!isLogin);
+                    setErrors({});
+                  }}
                   className="ml-2 text-primary hover:underline font-medium"
+                  disabled={isSubmitting}
                 >
                   {isLogin ? 'Sign up' : 'Sign in'}
                 </button>

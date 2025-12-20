@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Cpu, LogOut, Plus, Search, LayoutGrid, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { analyzeDatasheet, streamJobStatus } from '@/lib/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -27,13 +28,36 @@ const Dashboard = () => {
 
   const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
-    // Simulate processing
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    setIsProcessing(false);
-    setIsUploadOpen(false);
-    toast.success('Datasheet uploaded successfully', {
-      description: 'Processing will begin shortly. Check back for results.',
-    });
+    try {
+      const response = await analyzeDatasheet(file);
+      setIsUploadOpen(false);
+      toast.success('Datasheet uploaded successfully', {
+        description: `Job ${response.job_id.substring(0, 8)}... is processing.`,
+      });
+      
+      const eventSource = streamJobStatus(response.job_id, (event) => {
+        if (event.event === 'agent_update') {
+          toast.info(event.data.message || 'Processing...', {
+            description: `Node: ${event.data.node}`,
+          });
+        } else if (event.event === 'error') {
+          toast.error('Processing error', {
+            description: event.data.message,
+          });
+          eventSource.close();
+        }
+      });
+
+      setTimeout(() => {
+        navigate(`/design/${response.job_id}`);
+      }, 2000);
+    } catch (error) {
+      toast.error('Upload failed', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleLogout = async () => {

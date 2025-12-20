@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, Cpu, Package, Copy, ExternalLink } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Download, FileText, Cpu, Package, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { mockDesigns, BOMItem } from '@/lib/mockData';
 import { toast } from 'sonner';
 import {
   Table,
@@ -12,17 +12,52 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { getJobStatus, downloadSchematic, downloadBOM, type FinalDesignResponse } from '@/lib/api';
 
 const DesignDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const design = mockDesigns.find(d => d.id === id);
+  const [design, setDesign] = useState<FinalDesignResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<string>('');
+
+  useEffect(() => {
+    if (id) {
+      loadDesign(id);
+    }
+  }, [id]);
+
+  const loadDesign = async (jobId: string) => {
+    try {
+      setLoading(true);
+      const response = await getJobStatus(jobId);
+      setStatus(response.status);
+      if (response.design) {
+        setDesign(response.design);
+      }
+    } catch (error) {
+      toast.error('Failed to load design', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   if (!design) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-2">Design not found</h2>
+          <p className="text-muted-foreground mb-4">Status: {status}</p>
           <Button variant="outline" onClick={() => navigate('/dashboard')}>
             Return to Dashboard
           </Button>
@@ -32,15 +67,17 @@ const DesignDetail = () => {
   }
 
   const handleDownloadSchematic = () => {
-    toast.success('Downloading KiCad schematic...', {
-      description: `${design.partNumber}_schematic.kicad_sch`,
-    });
+    if (id) {
+      downloadSchematic(id);
+      toast.success('Downloading KiCad schematic...');
+    }
   };
 
   const handleDownloadBOM = () => {
-    toast.success('Downloading BOM...', {
-      description: `${design.partNumber}_bom.csv`,
-    });
+    if (id) {
+      downloadBOM(id);
+      toast.success('Downloading BOM...');
+    }
   };
 
   const handleCopyPartNumber = (pn: string) => {
@@ -58,8 +95,8 @@ const DesignDetail = () => {
               <ArrowLeft className="w-5 h-5" />
             </Button>
             <div>
-              <h1 className="font-semibold">{design.name}</h1>
-              <p className="text-sm font-mono text-primary">{design.partNumber}</p>
+              <h1 className="font-semibold">{design.metadata.device_name || 'Design'}</h1>
+              <p className="text-sm font-mono text-primary">{design.metadata.datasheet_title || id}</p>
             </div>
           </div>
 
@@ -87,7 +124,7 @@ const DesignDetail = () => {
               </div>
               <span className="text-sm text-muted-foreground">Part Number</span>
             </div>
-            <p className="font-mono text-lg font-semibold">{design.partNumber}</p>
+            <p className="font-mono text-lg font-semibold">{design.metadata.datasheet_title || 'N/A'}</p>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-5 animate-fade-in" style={{ animationDelay: '100ms' }}>
@@ -95,9 +132,9 @@ const DesignDetail = () => {
               <div className="p-2 bg-primary/10 rounded-lg">
                 <FileText className="w-5 h-5 text-primary" />
               </div>
-              <span className="text-sm text-muted-foreground">Manufacturer</span>
+              <span className="text-sm text-muted-foreground">Status</span>
             </div>
-            <p className="text-lg font-semibold">{design.manufacturer}</p>
+            <p className="text-lg font-semibold">{design.status}</p>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-5 animate-fade-in" style={{ animationDelay: '200ms' }}>
@@ -107,7 +144,7 @@ const DesignDetail = () => {
               </div>
               <span className="text-sm text-muted-foreground">Components</span>
             </div>
-            <p className="text-lg font-semibold">{design.bomItems?.length || 0} items</p>
+            <p className="text-lg font-semibold">{design.bom.length} items</p>
           </div>
         </div>
 
@@ -149,9 +186,9 @@ const DesignDetail = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {design.bomItems?.map((item: BOMItem, index: number) => (
+                  {design.bom.map((item, index: number) => (
                     <TableRow 
-                      key={item.id}
+                      key={`${item.reference}-${index}`}
                       className="animate-fade-in"
                       style={{ animationDelay: `${index * 50}ms` }}
                     >
@@ -160,21 +197,23 @@ const DesignDetail = () => {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm">{item.partNumber}</span>
-                          <button
-                            onClick={() => handleCopyPartNumber(item.partNumber)}
-                            className="p-1 hover:bg-secondary rounded transition-colors"
-                          >
-                            <Copy className="w-3.5 h-3.5 text-muted-foreground" />
-                          </button>
+                          <span className="font-mono text-sm">{item.part_number || 'N/A'}</span>
+                          {item.part_number && (
+                            <button
+                              onClick={() => handleCopyPartNumber(item.part_number!)}
+                              className="p-1 hover:bg-secondary rounded transition-colors"
+                            >
+                              <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+                            </button>
+                          )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{item.manufacturer}</TableCell>
+                      <TableCell className="text-muted-foreground">{item.manufacturer || 'N/A'}</TableCell>
                       <TableCell className="hidden md:table-cell text-muted-foreground max-w-xs truncate">
-                        {item.description}
+                        {item.description || 'N/A'}
                       </TableCell>
                       <TableCell className="hidden lg:table-cell font-mono text-sm text-muted-foreground">
-                        {item.package}
+                        {item.package || 'N/A'}
                       </TableCell>
                       <TableCell className="text-center font-medium">{item.quantity}</TableCell>
                       <TableCell>

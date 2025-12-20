@@ -43,7 +43,7 @@ const DesignCard = ({ design }: DesignCardProps) => {
     <div
       onClick={handleClick}
       className={cn(
-        "group bg-card border border-border rounded-xl p-5 transition-all duration-300",
+        "group bg-card border border-border rounded-xl p-5 transition-all duration-300 h-full flex flex-col",
         "hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5",
         design.status === 'completed' && "cursor-pointer"
       )}
@@ -57,7 +57,7 @@ const DesignCard = ({ design }: DesignCardProps) => {
         </div>
         
         <div className={cn(
-          "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border",
+          "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border shrink-0 ml-2",
           status.className
         )}>
           <StatusIcon className={cn("w-3.5 h-3.5", status.iconClassName)} />
@@ -65,7 +65,7 @@ const DesignCard = ({ design }: DesignCardProps) => {
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <div className="flex items-center justify-between text-sm text-muted-foreground mt-auto">
         <div className="flex items-center gap-4">
           <span>{design.manufacturer}</span>
           <span className="flex items-center gap-1">

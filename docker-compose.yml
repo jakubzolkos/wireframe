@@ -14,9 +14,7 @@ services:
     volumes:
       - uploads_data:/tmp/uploads
     environment:
-      STRIPE_API_KEY: ${STRIPE_API_KEY:-sk_test_51S8ndWRoKR4nu4pBWjwvfA3nc8fO07GwgmZsLY8huqBSAFh3JdusQRAcjxuV85o2pTOH0RYL0tCCTkjqpeSw4EWO003KNdbUQD}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-"whsec_2d0f3c18aa95583ec6290c77c1b6418e9174c623b48a8e80910d1c5e6f0c0bf0"}
       UL_CLIENT_ID: ${UL_CLIENT_ID:-"autopcb_client"}
       UL_CLIENT_SECRET: ${UL_CLIENT_SECRET}
       DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID}

@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Cpu, LogOut, Plus, Search, LayoutGrid, List } from 'lucide-react';
+import { Cpu, Plus, Search, LayoutGrid, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import UploadZone from '@/components/UploadZone';
 import DesignCard from '@/components/DesignCard';
+import UserMenu from '@/components/UserMenu';
 import { mockDesigns } from '@/lib/mockData';
 import { cn } from '@/lib/utils';
 import {
@@ -16,11 +17,10 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { analyzeDatasheet, streamJobStatus } from '@/lib/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { signOut, user } = useAuth();
+  const { signOut } = useAuth();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,28 +29,12 @@ const Dashboard = () => {
   const handleFileSelect = async (file: File) => {
     setIsProcessing(true);
     try {
-      const response = await analyzeDatasheet(file);
+      // Mock processing for now
+      await new Promise(resolve => setTimeout(resolve, 1500));
       setIsUploadOpen(false);
       toast.success('Datasheet uploaded successfully', {
-        description: `Job ${response.job_id.substring(0, 8)}... is processing.`,
+        description: 'Processing will begin shortly.',
       });
-      
-      const eventSource = streamJobStatus(response.job_id, (event) => {
-        if (event.event === 'agent_update') {
-          toast.info(event.data.message || 'Processing...', {
-            description: `Node: ${event.data.node}`,
-          });
-        } else if (event.event === 'error') {
-          toast.error('Processing error', {
-            description: event.data.message,
-          });
-          eventSource.close();
-        }
-      });
-
-      setTimeout(() => {
-        navigate(`/design/${response.job_id}`);
-      }, 2000);
     } catch (error) {
       toast.error('Upload failed', {
         description: error instanceof Error ? error.message : 'Unknown error',
@@ -60,7 +44,7 @@ const Dashboard = () => {
     }
   };
 
-  const handleLogout = async () => {
+  const handleSignOut = async () => {
     await signOut();
     toast.success('Signed out successfully');
     navigate('/');
@@ -87,16 +71,10 @@ const Dashboard = () => {
             <div className="p-2 rounded-lg bg-primary/10 border border-primary/30">
               <Cpu className="w-5 h-5 text-primary" />
             </div>
-            <span className="text-lg font-semibold">SchematicAI</span>
+            <span className="text-lg font-semibold">Wireframe</span>
           </div>
 
           <div className="flex items-center gap-4">
-            {user && (
-              <span className="text-sm text-muted-foreground hidden sm:block">
-                {user.email}
-              </span>
-            )}
-            
             <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
               <DialogTrigger asChild>
                 <Button variant="glow">
@@ -112,9 +90,7 @@ const Dashboard = () => {
               </DialogContent>
             </Dialog>
 
-            <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
-              <LogOut className="w-5 h-5" />
-            </Button>
+            <UserMenu onSignOut={handleSignOut} />
           </div>
         </div>
       </header>

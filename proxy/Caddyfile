@@ -1,0 +1,71 @@
+{ # global options
+    admin off # theres no need for the admin api in railway's environment
+    persist_config off # storage isn't persistent anyway
+    auto_https off # railway handles https for us, this would cause issues if left enabled
+    log { # runtime logs
+        format console # set runtime log format to console mode
+    }
+    servers { # server options
+        trusted_proxies static private_ranges # trust railway's proxy
+    }
+}
+
+:{$PORT} { # site block, listens on the $PORT environment variable, automatically assigned by railway
+    log { # access logs
+        format console # set access log format to console mode
+    }
+
+    # This is to handle redirecting www to the naked domain
+    # It only works for the domains listed below
+    # If it matches it will redirect and then hte blocks below will apply on the new request
+    @www host www.autopcb.app
+    handle @www {
+        redir https://autopcb.app{uri} permanent
+    }
+
+
+    handle_path /api/* { # this handles all requests for /api/*
+        reverse_proxy {$BACKEND_HOST} # proxy all requests for /api/* to the backend, configure this variable in the service settings
+    }
+
+    # This fixes the issue where the deployed site on Railway(running behind a reverse proxy)
+    # doesn't load the API docs correctly. This is because the API docs are served from the backend
+    # and not the frontend. So we need to proxy the request to the backend for the API docs to load.
+    # This handle directive will match all requests for /openapi.json and proxy them to the backend.
+    handle /openapi.json { # this handles all requests for /openapi.json
+        reverse_proxy {$BACKEND_HOST} # proxy all requests for /openapi.json to the backend, configure this variable in the service settings
+    }
+
+    reverse_proxy {$FRONTEND_HOST} # proxy all requests for /* to the frontend, configure this variable in the service settings
+
+    redir /apply https://airtable.com/appNC7NPgyZtDrZuc/pagkounswqLk7Oxza/form 302
+
+    # the handle_path directive will strip /api/ from the path before proxying
+    # this is needed if your backend's api routes don't start with /api/
+    # change paths as needed
+    # handle_path /api/* { # this strips the /api/ prefix from the uri sent to the proxy address
+    #     reverse_proxy {$BACKEND_HOST} # proxy all requests for /api/* to the backend, configure this variable in the service settings
+    # }
+
+    # if your backend's api routes do start with /api/ then you wouldn't want to strip the path prefix
+    # if so, comment out the above handle_path block, and uncomment this reverse_proxy directive
+    # change paths as needed
+    # reverse_proxy {$BACKEND_HOST} # configure this variable in the service settings
+
+    # Reverse proxy to Posthog servers needed to bypass client adblockers
+    handle_path /phproxy/static* {
+        rewrite * /static/{path}
+        reverse_proxy https://{$POSTHOG_ASSETS_HOST}:{$POSTHOG_PORT}  {
+            header_up Host {$POSTHOG_ASSETS_HOST}
+            header_down -Access-Control-Allow-Origin
+        }
+    }
+
+    handle_path /phproxy* {
+        rewrite * {path}
+        reverse_proxy https://{$POSTHOG_HOST}:{$POSTHOG_PORT} {
+            header_up Host {$POSTHOG_HOST}
+            header_down -Access-Control-Allow-Origin
+        }
+    }
+}

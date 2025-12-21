@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "caddy": {
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:latest"
+        },
+        {
+          "local": true,
+          "include": ["."]
+        }
+      ],
+      "commands": [
+        "curl --retry 10 --retry-max-time 180 --retry-all-errors -fsSLo caddy.tar.gz 'https://github.com/caddyserver/caddy/releases/download/v2.7.6/caddy_2.7.6_linux_amd64.tar.gz'",
+        "tar -zxvf caddy.tar.gz caddy",
+        "chmod +x caddy"
+      ]
+    },
+    "fmt": {
+      "inputs": [
+        {
+          "step": "caddy"
+        }
+      ],
+      "commands": [
+        "./caddy fmt --overwrite Caddyfile"
+      ]
+    }
+  },
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:latest"
+    },
+    "inputs": [
+      {
+        "step": "fmt",
+        "include": [
+          "caddy",
+          "Caddyfile"
+        ]
+      }
+    ],
+    "startCommand": "./caddy run --config Caddyfile --adapter caddyfile 2>&1"
+  }
+}

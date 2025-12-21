@@ -1,51 +1,111 @@
-from contextlib import asynccontextmanager
+from app.api.v2 import chips, importers, subscriptions, datasheets
+
+from fastapi import APIRouter
+
+api_router = APIRouter()
+
+api_router.include_router(chips.router, prefix="/chips", tags=["Chips"])
+api_router.include_router(importers.router, prefix="/import", tags=["Import"])
+api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
+api_router.include_router(datasheets.router, prefix="/datasheets", tags=["Datasheets"])
+
+
+@api_router.get("/")
+def api_root():
+    return {"message": "You've reached the root of the backend api. Go to /docs for documentation."}
+
+from pathlib import Path
+
+import structlog
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.config import settings
-from app.utils.logging import configure_logging, get_logger
-from app.api.middleware.error_handler import exception_handler
-from app.api.middleware.tracing import TracingMiddleware
-from app.core.exceptions import EDAException
-from app.api.routes import analyze, jobs, resume, artifacts
-from app.services.database import init_db
+from fastapi.staticfiles import StaticFiles
 
-logger = get_logger(__name__)
+from app.api.v2.chips import router as chips_router
+from app.api.v2.importers import router as importers_router
+from app.api.v2.subscriptions import router as subscriptions_router
+from app.api.v2.datasheets import router as datasheets_router
+
+from fastapi import APIRouter
+
+api_router = APIRouter()
+
+api_router.include_router(chips_router, prefix="/chips", tags=["Chips"])
+api_router.include_router(importers_router, prefix="/import", tags=["Import"])
+api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["Subscriptions"])
+api_router.include_router(datasheets_router, prefix="/datasheets", tags=["Datasheets"])
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    configure_logging()
-    await init_db()
-    await logger.ainfo("application_startup", environment=settings.environment)
-    yield
-    await logger.ainfo("application_shutdown")
+@api_router.get("/")
+def api_root():
+    return {"message": "You've reached the root of the backend api. Go to /docs for documentation."}
 
+
+# Setup structured logging
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer(),
+    ],
+    logger_factory=structlog.PrintLoggerFactory(),
+)
+
+log = structlog.get_logger()
 
 app = FastAPI(
-    title="EDA Artifact Generation API",
-    description="Automated KiCad Schematic and BOM Generation from PDF Datasheets",
-    version="0.1.0",
-    lifespan=lifespan,
+    title="Wireframe Backend", 
+    version="0.1.0"
 )
+
+# CORS Configuration
+origins = [
+    "https://autopcb.app",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://dev.autopcb.app",
+    "https://prod.autopcb.app",
+    "https://wireframe.app", 
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(TracingMiddleware)
 
-app.add_exception_handler(EDAException, exception_handler)
-app.add_exception_handler(Exception, exception_handler)
-
-app.include_router(analyze.router)
-app.include_router(jobs.router)
-app.include_router(resume.router)
-app.include_router(artifacts.router)
-
+app.include_router(api_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "environment": settings.environment}
+    return {"status": "ok", "version": "0.1.0"}
+
+class NoCacheStaticFiles(StaticFiles):
+    def __init__(self, *args, **kwargs):
+        self.cachecontrol = "no-cache"
+        self.pragma = "no-cache"
+        super().__init__(*args, **kwargs)
+
+    def file_response(self, *args, **kwargs):
+        resp = super().file_response(*args, **kwargs)
+        resp.headers.setdefault("Cache-Control", self.cachecontrol)
+        resp.headers.setdefault("Pragma", self.pragma)
+        return resp
+
+# Check if static directory exists before mounting
+static_dir = Path("app/api/static")
+if static_dir.exists():
+    app.mount("/static", NoCacheStaticFiles(directory=str(static_dir)), name="static")
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8080,
+        reload=True,
+        workers=1, # Dev mode
+    )

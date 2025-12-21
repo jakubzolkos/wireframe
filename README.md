@@ -1,180 +1,892 @@
-Architecture Design Document: Automated EDA Artifact Generation SaaS Backend1. Executive Summary and Strategic Vision1.1. Project Context and Technical ImperativeThe Electronic Design Automation (EDA) industry currently faces a significant bottleneck in the hardware design lifecycle: the manual transcription of component specifications from static PDF datasheets into executable design artifacts. Engineers spend countless hours deciphering "Typical Application" schematics, extracting tabular electrical characteristics, and solving feedback loop equations to select passive components. This manual process is prone to human error, specifically in the calculation of critical values such as feedback resistors ($R_{fb}$) and compensation networks, which directly impact the stability and efficiency of power management integrated circuits (PMICs).We are tasked with architecting a SaaS backend that automates this workflow. The system transforms a raw PDF datasheet (e.g., a Texas Instruments Step-Down Converter) into a fully validated KiCad schematic and a calculated Bill of Materials (BOM).1.2. The Core Technical Constraint: The "Math Gap"A defining constraint of this architecture is the unreliability of Large Language Models (LLMs) in performing precise arithmetic and algebraic solving. While LLMs excel at semantic extraction and reasoning, they suffer from "hallucination" when tasked with numerical computation. Predicting that "R1 is 10k Ohms" based on probabilistic token generation is unacceptable in hardware design, where a 10% deviation can lead to catastrophic circuit failure.Consequently, this architecture rejects the "Direct Answer" pattern in favor of a "Code Interpreter" / "Tool Use" pattern. The LLM’s role is shifted from calculator to engineer: it identifies the problem, formulates the mathematical model (equations), extracts the boundary conditions (datasheet constants), and writes executable Python code to solve for the unknowns.1.3. Architectural Solution: The Cyclic Multi-Agent GraphTo implement this sophisticated reasoning chain, we adopt a Cyclic, Stateful Multi-Agent Architecture powered by LangGraph. Unlike linear "Chain-of-Thought" workflows, a cyclic graph allows for iterative error correction and human-in-the-loop (HITL) intervention. If a required variable is missing, the system does not fail; it loops back to query the user or re-scan the document.This document outlines the comprehensive implementation plan, adhering to a strict "2025/2026" Backend Coding Standard that prioritizes type safety, asynchronous concurrency, and observability.2. Part 1: The LangGraph Orchestration ("The Brain")The orchestration layer is the cognitive core of the application. We utilize LangGraph to model the datasheet-to-design workflow as a state machine. This approach allows us to define rigid interfaces between agents while permitting flexible, non-deterministic execution paths required for complex problem solving.2.1. Architectural Philosophy: Why Cyclic Graphs?In a linear chain (DAG), the output of one step is piped to the next. If the "Equation Extractor" fails to find a variable required by the "Math Engineer," the chain breaks. In a cyclic graph, the "Math Engineer" can signal a MissingVariable state, triggering a transition back to the "Constants Miner" to look specifically for that variable, or to a "Human-in-the-Loop" node to request user input. This resilience is critical for processing diverse datasheet formats.2.2. GraphState Definition (Pydantic V2)The GraphState serves as the shared memory or "blackboard" for all agents. To ensure rigorous type safety across agent boundaries, we define the state using Pydantic V2. This enforces data validation at runtime, preventing the common "garbage-in, garbage-out" issues prevalent in untyped Python dictionaries.Pythonfrom typing import List, Dict, Optional, Any, Union, Annotated
-from pydantic import BaseModel, Field, HttpUrl
+Architectural Blueprint for Evidence-Based EDA Automation: The Datasheet-to-KiCad Platform1. Executive Summary and Strategic Architectural VisionThe electronic design automation (EDA) landscape stands on the precipice of a fundamental shift. For decades, the primary mechanism for knowledge transfer between component manufacturers and design engineers has been the PDF datasheet—a static, unstructured, and often voluminous document. The manual transcription of reference designs from these documents into EDA tools like KiCad is not merely a bottleneck; it is a profound source of engineering risk. A transcription error in a feedback resistor value or a decoupling capacitor rating can result in prototype failure, board spins, and significant financial loss.This report outlines the comprehensive software architecture for the "Datasheet-to-KiCad" web application. This platform is not a simple optical character recognition (OCR) utility. It is an evidence-based generative system designed to transform unstructured technical documentation into strictly typed, physically valid, and fully traceable engineering artifacts.1.1 The Core Directive: Evidence-Based GenerationThe central tenet of this architecture is the "Golden Rule" of Traceability. In conventional generative AI applications, the provenance of a generated output is often opaque—a phenomenon inextricably linked to the stochastic nature of Large Language Models (LLMs). For professional engineering workflows, this opacity is unacceptable. An engineer cannot trust a generated Bill of Materials (BOM) unless the system can prove why it selected a specific component.Therefore, our architecture treats lineage metadata as a first-class citizen, equal in importance to the electrical properties of the components themselves. Every artifact generated by this system—whether a netlist connection, a component value, or a parametric constraint—must carry an immutable link back to its source. This link includes the specific page index, the precise text snippet used for reasoning, and the spatial bounding box coordinates within the source PDF. This facilitates a user experience where a frontend user can hover over "R1" in a generated schematic and immediately visualize the exact paragraph on Page 12 of the datasheet where the manufacturer specified: "R1 sets the switching frequency to 100kHz."1.2 Technology Stack JustificationTo achieve the requisite rigor, we employ a sophisticated technology stack chosen for strict type safety, asynchronous performance, and layout-aware processing.ComponentTechnologyArchitectural JustificationRuntime EnvironmentPython 3.12+Selected for advanced typing features including TypeVar, Generic, and NewType. These features allow us to enforce strict contracts between agents, preventing "primitive obsession" where generic strings pass unchecked through the system.API FrameworkFastAPI (Async)The agentic workflows are I/O bound, involving long-polling LLM inference and external API calls (DigiKey). FastAPI's native asynchronous event loop allows high concurrency without blocking server threads.OrchestrationLangGraphUnlike linear chains, EDA workflows require cyclic reasoning. The "Resolution Agent" must be able to loop back to the "Extraction Agent" if a component search yields ambiguous results. LangGraph's stateful, cyclic graph architecture supports these recursive refinement loops.Ingestionmarker-pdfTraditional OCR (e.g., Tesseract) destroys spatial layout. marker-pdf uses deep learning (Surya) to analyze layout, preserving the structural relationship between table headers and cell values, which is critical for accurate extraction.Synthesiskicad-sch-apiWe avoid the overhead of running headless KiCad binaries. Instead, we use kicad-sch-api to manipulate the S-expression files directly, ensuring 100% format compliance with KiCad 6/7/8 standards while allowing precise injection of custom metadata fields.ValidationPydantic V2We utilize Pydantic's "Strict Mode" to serve as the system's immune system. By validating data "at the edges" (ingress and egress), we ensure that invalid physical states (e.g., a resistor with negative resistance) result in immediate, localized failures rather than silent propagation.2. Domain-Driven Design (DDD) and Clean ArchitectureTo manage the complexity of this multi-agent system, we strictly adhere to Clean Architecture principles (also known as Hexagonal Architecture). This segregates the software into concentric layers of responsibility, ensuring that the core business logic (the "Domain") remains isolated from external frameworks, databases, and third-party APIs.2.1 The Dependency RuleThe paramount rule governing this structure is that source code dependencies must point only inward.The Domain Layer knows nothing of FastAPI, LangChain, or DigiKey. It defines what a component is.The Application Layer orchestrates the Domain objects using abstract interfaces. It defines how to extract a circuit.The Infrastructure Layer implements the interfaces using specific libraries (marker-pdf, OpenAI, DigiKey API).The Interface Layer (FastAPI) handles the HTTP transport mechanism.2.2 Detailed Directory StructureThe following directory tree represents the physical manifestation of these architectural principles.Plaintextbackend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                   # Application Entry Point & Exception Handlers
+│   │
+│   ├── api/                      # INTERFACE LAYER (Adapters)
+│   │   ├── __init__.py
+│   │   ├── dependencies.py       # Dependency Injection Container (Client Factories)
+│   │   ├── middleware.py         # CORS, Logging, Request ID generation
+│   │   ├── v1/
+│   │   │   ├── __init__.py
+│   │   │   ├── router.py         # Main Router aggregation
+│   │   │   └── endpoints/
+│   │   │       ├── submission.py # POST /process: Triggers LangGraph
+│   │   │       ├── artifacts.py  # GET /download: Retrieves .kicad_sch
+│   │   │       └── feedback.py   # POST /feedback: User correction of bounding boxes
+│   │   └── schemas/              # Data Transfer Objects (DTOs) for API I/O
+│   │       ├── request.py
+│   │       └── response.py
+│   │
+│   ├── domain/                   # DOMAIN LAYER (Pure Python/Pydantic)
+│   │   ├── __init__.py
+│   │   ├── entities/
+│   │   │   ├── component.py      # TraceableComponent & ComponentSpec
+│   │   │   ├── netlist.py        # GenericNetlist & Connectivity Graph
+│   │   │   └── datasheet.py      # Datasheet Entity & Page abstractions
+│   │   ├── value_objects/
+│   │   │   ├── lineage.py        # LineageMetadata, BoundingBox, Citation
+│   │   │   └── ids.py            # NewType definitions (ComponentID, PageNum)
+│   │   ├── events.py             # Domain Events (ExtractionCompleted, ValidationFailed)
+│   │   └── exceptions.py         # Domain-specific error hierarchy
+│   │
+│   ├── services/                 # APPLICATION LAYER (Business Logic)
+│   │   ├── __init__.py
+│   │   ├── ingestion_service.py  # Coordinator for PDF processing
+│   │   ├── schematic_builder.py  # Logic for grid alignment & placement
+│   │   └── sourcing_service.py   # Domain service wrapping DigiKey/UL clients
+│   │
+│   ├── workflows/                # LANGGRAPH AGENT ORCHESTRATION
+│   │   ├── __init__.py
+│   │   ├── state.py              # AgentState (TypedDict/Pydantic) definitions
+│   │   ├── graph.py              # StateGraph definition & edge logic
+│   │   └── nodes/                # Individual Agent Implementations
+│   │       ├── __init__.py
+│   │       ├── ingestion_node.py # Wraps marker-pdf
+│   │       ├── supervisor_node.py# Heuristic + LLM Router
+│   │       ├── extraction_node.py# Multimodal LLM Extraction
+│   │       ├── resolution_node.py# Parametric Search Logic
+│   │       └── generator_node.py # KiCad Synthesis Logic
+│   │
+│   ├── infrastructure/           # INFRASTRUCTURE LAYER (External Drivers)
+│   │   ├── __init__.py
+│   │   ├── adapters/
+│   │   │   ├── marker_adapter.py # Concrete implementation of PDF parsing
+│   │   │   ├── kicad_adapter.py  # Concrete implementation of file generation
+│   │   │   └── llm_factory.py    # Azure/OpenAI Client setup
+│   │   ├── clients/              # EXISTING INFRASTRUCTURE (The "Part 5" System)
+│   │   │   ├── digikey.py        # Existing DigiKey Client
+│   │   │   └── ul.py             # Existing UltraLibrarian Client
+│   │   └── config/
+│   │       ├── settings.py       # Pydantic BaseSettings (Env Vars)
+│   │       └── logging.py        # Structured Logging setup
+│   │
+│   └── utils/
+│       ├── __init__.py
+│       ├── geometry.py           # Bounding Box Math (IoU, Normalization)
+│       └── file_ops.py           # Temp file management
+│
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py               # Global Pytest fixtures
+│   ├── unit/                     # Fast, isolated tests
+│   │   ├── domain/
+│   │   └── services/
+│   ├── integration/              # Tests with External dependencies (VCRpy)
+│   │   ├── infrastructure/
+│   │   └── workflows/
+│   └── e2e/                      # Full pipeline tests using Golden Dataset
+│
+├── pyproject.toml                # Poetry dependencies & Tool Config (mypy, ruff)
+├── mypy.ini                      # Strict Type Checking Configuration
+└── README.md
+This structure is designed for scalability. The segregation of workflows from domain logic means that we can modify the agent graph topology without altering the fundamental definition of a component. Similarly, the infrastructure/clients directory incorporates the existing DigiKey and UltraLibrarian clients as stipulated, wrapping them in domain-aware services within app/services/sourcing_service.py.3. Strict Data Modeling and Type SafetyIn adherence to the requirement for "Strict Static Typing" and "Zero Tolerance for Any," we employ advanced Python 3.12 typing features. This approach transforms runtime errors into static analysis errors, catchable by mypy before deployment.3.1 Traceability Primitives: The Lineage MetadataThe core of the "Evidence-Based Generation" requirement is the data structure that holds the evidence. We define this in the value_objects module. We use NewType to prevent identifier swapping (e.g., passing a PageNumber into a function expecting a ComponentID).Python# app/domain/value_objects/lineage.py
+from typing import NewType, Tuple
+from pydantic import BaseModel, Field, field_validator
+
+# Strict Identifier Types
+ComponentID = NewType('ComponentID', str)
+PageNumber = NewType('PageNumber', int)
+
+class BoundingBox(BaseModel):
+    """
+    Represents a normalized bounding box on a PDF page.
+    Coordinates are strictly normalized to [0.0, 1.0].
+    Format: (x_min, y_min, x_max, y_max)
+    Origin: Top-Left (0,0)
+    """
+    coords: Tuple[float, float, float, float]
+
+    @field_validator('coords', mode='after')
+    @classmethod
+    def validate_normalization(cls, v: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+        x1, y1, x2, y2 = v
+        if not (0.0 <= x1 <= 1.0 and 0.0 <= y1 <= 1.0 and
+                0.0 <= x2 <= 1.0 and 0.0 <= y2 <= 1.0):
+            raise ValueError(f"Coordinates must be normalized (0.0-1.0). Got: {v}")
+        if x1 >= x2 or y1 >= y2:
+            raise ValueError(f"Invalid geometry: x1 must be < x2 and y1 < y2. Got: {v}")
+        return v
+
+    def to_kicad_coords(self, page_width_mm: float, page_height_mm: float) -> Tuple[float, float]:
+        """Converts normalized PDF center to KiCad layout coordinates."""
+        center_x = (self.coords[0] + self.coords[2]) / 2
+        center_y = (self.coords[1] + self.coords[3]) / 2
+        return (center_x * page_width_mm, center_y * page_height_mm)
+
+class LineageMetadata(BaseModel):
+    """
+    The 'DNA' of traceability. Links a value back to its extraction source.
+    This object persists through the entire chain.
+    """
+    source_page_index: PageNumber
+    source_text_snippet: str = Field(..., description="The exact text snippet cited from the PDF.")
+    bounding_box: BoundingBox
+    confidence_score: float = Field(..., ge=0.0, le=1.0, description="Model confidence")
+
+    model_config = {"frozen": True}  # Immutable once created
+3.2 The Traceable Component EntityThis entity encapsulates the physical and sourcing data of a component. We use Pydantic V2's model_validator to enforce domain invariants—preventing the system from representing physically impossible components.Python# app/domain/entities/component.py
+from typing import Optional, Literal
+from pydantic import BaseModel, Field, model_validator
+from app.domain.value_objects.lineage import LineageMetadata, ComponentID
+
+class ComponentSpec(BaseModel):
+    """
+    Physical specifications extracted from text.
+    Strictly typed to prevent '10k' strings where floats are needed.
+    """
+    resistance_ohms: Optional[float] = None
+    capacitance_farads: Optional[float] = None
+    inductance_henrys: Optional[float] = None
+    tolerance_percent: Optional[float] = None
+    voltage_rating: Optional[float] = None
+    power_watts: Optional[float] = None
+    package_case: Optional[str] = None  # e.g., "0603", "SOT-23"
+
+class TraceableComponent(BaseModel):
+    uid: ComponentID
+    designator: str = Field(..., pattern=r'^[A-Z]+\d+$') # e.g., R1, C12
+    raw_value: str # The extracted text value, e.g., "10k 1%"
+
+    # The resolved specifications used for DigiKey search
+    specs: ComponentSpec
+
+    # Provenance: The mandatory link to the PDF
+    provenance: LineageMetadata
+
+    # Resolved Sourcing Data (populated by Resolution Agent)
+    manufacturer_part_number: Optional[str] = None
+    digikey_part_number: Optional[str] = None
+    ul_footprint_id: Optional[str] = None
+
+    # Verification Status
+    is_resolved: bool = False
+
+    @model_validator(mode='after')
+    def validate_consistency(self) -> 'TraceableComponent':
+        """
+        Defensive Programming: Ensure specs match the designator type.
+        """
+        prefix = self.designator[0]
+        if prefix == 'R' and self.specs.resistance_ohms is None:
+            # We might allow unresolved resistance if we have an MPN,
+            # but generally this implies incomplete extraction.
+            if not self.manufacturer_part_number:
+                raise ValueError(f"Resistor {self.designator} missing resistance value.")
+        if prefix == 'C' and self.specs.capacitance_farads is None:
+             if not self.manufacturer_part_number:
+                raise ValueError(f"Capacitor {self.designator} missing capacitance value.")
+        return self
+4. Infrastructure Layer: Ingestion and The Marker ProtocolThe quality of the output is strictly limited by the quality of the input. Standard PDF text extraction (e.g., pypdf, Tesseract) is insufficient because it discards the spatial layout relationships that define "context" in a datasheet.4.1 The Marker-PDF AdapterWe utilize marker-pdf as our ingestion engine. Marker utilizes a pipeline of deep learning models (Surya for OCR and layout analysis, Texify for equation formatting) to convert PDF pages into Markdown while retaining block-level metadata.Unlike older libraries, marker-pdf (v1.0+) uses a class-based PdfConverter which requires pre-loading model artifacts. This approach ensures thread safety and prevents repeated model loading in our async API.Implementation Details:Python# app/infrastructure/adapters/marker_adapter.py
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.output import text_from_rendered
+from app.domain.exceptions import IngestionError
+
+class MarkerAdapter:
+    def __init__(self):
+        # Load heavy models once during application startup
+        self.model_lst = create_model_dict()
+        self.converter = PdfConverter(
+            artifact_dict=self.model_lst
+        )
+
+    def process_pdf(self, file_path: str):
+        try:
+            # Render the PDF to blocks
+            rendered = self.converter(file_path)
+            
+            # Extract text, metadata, and images
+            # images is a dictionary of {image_filename: image_content}
+            text, _, images = text_from_rendered(rendered)
+            
+            return text, images
+        except Exception as e:
+            raise IngestionError(f"Marker failed to process PDF: {str(e)}")
+Ingestion Workflow:File Upload: PDF is streamed to a temporary volume.Marker Execution: The PdfConverter is invoked on the file path.Artifact Extraction: The text_from_rendered function returns the full Markdown string and an image dictionary.Spatial Indexing: The service parses the internal block structure (available within the rendered object) to build an R-Tree mapping Text Snippet -> BoundingBox. This index is critical for the "Extraction Agent" to later verify its hallucinations against ground truth locations.Defensive Programming (Fail Fast):As per the requirements, if marker-pdf returns a low confidence score or fails to detect a recognizable layout, the IngestionService raises a custom IngestionError. This halts the pipeline immediately, preventing the propagation of corrupted data to downstream agents.5. Application Layer: The Agent Orchestration (LangGraph)The core intelligence of the system is modeled as a stateful graph using LangGraph. This allows for sophisticated control flow, including conditional branching and cyclical refinement, which are impossible in linear execution chains.5.1 The Graph State SchemaThe AgentState defines the shared memory of the system. It uses TypedDict or Pydantic models to ensure that agents communicate using structured data.Python# app/workflows/state.py
+from typing import List, Annotated, Dict, Optional
 import operator
+from pydantic import BaseModel, Field
+from app.domain.entities.component import TraceableComponent
+from app.domain.entities.netlist import GenericNetlist
+from app.domain.value_objects.ids import PageNum
 
-# Reducer function to allow agents to append messages to the history
-def merge_messages(left: List[Any], right: List[Any]) -> List[Any]:
-    return left + right
+class IngestionArtifacts(BaseModel):
+    full_markdown: str
+    spatial_index: Dict # Page -> List of {text, bbox}
 
-class PDFChunk(BaseModel):
-    """Represents a semantic segment of the datasheet."""
-    content: str
-    page_number: int
-    section_title: Optional[str] = None
+class AgentState(BaseModel):
+    # Input
+    datasheet_path: str
 
-class ExtractedConstant(BaseModel):
-    """Represents a fixed value found in tables."""
-    name: str = Field(..., description="Standardized name, e.g., 'V_ref'")
-    value: float
-    unit: str
-    source_context: str = Field(..., description="Snippet verifying the extraction")
+    # Ingestion Output
+    artifacts: Optional[IngestionArtifacts] = None
 
-class ExtractedEquation(BaseModel):
-    """Represents a design formula found in text."""
-    target_variable: str # e.g., "R1"
-    latex_raw: str       # e.g., "R_1 = R_2 \times (V_{out}/V_{ref} - 1)"
-    python_code: str     # e.g., "R1 = R2 * (V_out / V_ref - 1)"
-    dependencies: List[str] # e.g.,
+    # Supervisor Output
+    reference_design_pages: List[PageNum] = Field(default_factory=list)
 
-class Component(BaseModel):
-    """Represents a node in the Abstract Netlist."""
-    ref_des: str # e.g., "U1"
-    value: str   # e.g., "TPS62125" or "10uF"
-    pins: Dict[str, str] # e.g., {"1": "VIN", "2": "GND"}
-    footprint: Optional[str] = None
+    # Extraction Output
+    extracted_bom: List[TraceableComponent] = Field(default_factory=list)
+    netlist: Optional[GenericNetlist] = None
 
-class GraphState(BaseModel):
+    # Resolution Status
+    unresolved_ids: List[str] = Field(default_factory=list)
+
+    # Final Artifacts
+    kicad_project_path: Optional[str] = None
+
+    # Graph Control Flow
+    errors: List[str] = Field(default_factory=list)
+5.2 The Node Logic and Agent ResponsibilitiesThe graph consists of five primary nodes, wired together to form the processing pipeline.Node 1: The Ingestion AgentRole: Wraps the IngestionService.Responsibility: Converts PDF to Markdown/JSON using the MarkerAdapter.Failure Mode: If the file is unreadable or encrypted, it transitions to an END state with an error message, bypassing the rest of the graph.Node 2: The Supervisor (The "Reference Finder")Datasheets for complex ICs often exceed 50 pages. Passing the entire document to an Extraction Agent is cost-prohibitive and introduces noise (irrelevant tables, packaging info).Logic: The Supervisor uses a fast, cheap LLM (e.g., GPT-4o-mini) to scan the headers and captions generated by marker-pdf.Prompt: "Identify the page range containing the 'Typical Application Circuit' or 'Reference Design' and its associated Bill of Materials table."Output: A focused List[PageNum] (e.g., [12, 13]).Node 3: The Extraction Agent (The "Core Intelligence")This agent performs the heavy lifting of interpreting the schematic and BOM.Input: The high-resolution images of the pages identified by the Supervisor, plus the Markdown text of tables on those pages.Chain-of-Thought Citation: The prompt explicitly instructs the model: "For every component you extract, you must quote the exact text in the document that justifies your extraction."Fuzzy Matching Service: The LLM returns the text citation. A helper service in this node takes that text and searches the IngestionArtifacts.spatial_index to find the corresponding BoundingBox. This closes the loop on traceability, attaching the bbox to the component entity.Validation: It produces a GenericNetlist. Pydantic validators ensure the netlist is a connected graph (e.g., no floating components unless explicitly noted).Node 4: The Component Resolution Agent (The "Sourcing Expert")This node integrates the existing "Part 5" infrastructure.Logic: Iterates through state.extracted_bom.Adapter Pattern: It calls sourcing_service.find_best_match(spec). This service internally calls DigiKeyClient.convert_to_digikey_filters() (e.g., converting "10k" to "10 kOhms") and search_chips().Cyclic Refinement: If DigiKey returns > 50 results (ambiguity) or 0 results (over-constrained), the agent triggers a Refinement Loop. It re-examines the source_text_snippet for clues (e.g., "Low ESR", "X7R") and adjusts the search filters before retrying.Node 5: The Generator Agent (The "Synthesizer")This agent constructs the physical KiCad files.Tooling: Utilizes kicad-sch-api to build the .kicad_sch file.Coordinate Transformation: It maps the abstract connectivity graph to physical coordinates. We implement a Force-Directed Layout algorithm (using networkx) to determine relative positions, then snap these positions to the KiCad 1.27mm (50 mil) grid.Metadata Injection: This is where the persistence requirement is satisfied.Python# Logic in generator_node.py
+component = sch.components.add(lib_id=comp.ul_footprint_id,...)
+# Injecting the Lineage
+component.fields.add(name="Datasheet_Page", value=str(comp.provenance.source_page_index))
+component.fields.add(name="Datasheet_Snippet", value=comp.provenance.source_text_snippet)
+component.fields.add(name="Datasheet_BBox", value=str(comp.provenance.bounding_box.coords))
+5.3 Graph TopologyThe graph definition in app/workflows/graph.py ties these nodes together.Pythonworkflow = StateGraph(AgentState)
+workflow.add_node("ingest", ingestion_node)
+workflow.add_node("supervisor", supervisor_node)
+workflow.add_node("extract", extraction_node)
+workflow.add_node("resolve", resolution_node)
+workflow.add_node("generate", generator_node)
+
+workflow.set_entry_point("ingest")
+workflow.add_edge("ingest", "supervisor")
+workflow.add_edge("supervisor", "extract")
+workflow.add_edge("extract", "resolve")
+# Conditional Edge based on resolution success
+workflow.add_conditional_edges(
+    "resolve",
+    should_retry_resolution, # function checking state.unresolved_ids
+    {
+        "retry": "resolve",  # Loop back if needed (with improved strategy)
+        "continue": "generate"
+    }
+)
+workflow.add_edge("generate", END)
+6. Physical Artifact Generation: KiCad InternalsThe requirement to generate a valid KiCad schematic implies strict adherence to the S-expression file format.6.1 Coordinate Systems and GridsKiCad 6+ uses a coordinate system where 1 unit = 0.01mm (internally) but typically represents coordinates in millimeters in the API. Crucially, the Y-axis direction in schematic space (+Y is Down) is often inverted relative to symbol library space (+Y is Up).The Generator Agent must respect the 1.27mm (50 mil) Grid. Placing components off-grid makes them nearly impossible to wire manually later. Our SchematicBuilder service includes a snap_to_grid(coord: float) -> float utility that rounds all calculated positions to the nearest multiple of 1.27.6.2 Symbol Library ManagementThe system relies on the UltraLibrarianClient to fetch .kicad_sym (Symbol) and .kicad_mod (Footprint) files. The Generator Agent must dynamically manage a project-specific symbol library table (sym-lib-table). When the Resolution Agent selects a part, the Generator downloads the symbol, adds it to the project's library folder, and updates the sym-lib-table so KiCad can resolve the reference.7. Interface Layer: API and Dependency InjectionThe interface layer defines how external actors interact with the system. We use FastAPI for its performance and auto-generation of OpenAPI documentation.7.1 Routes and ControllersRoutes are kept extremely thin. They validate input using Pydantic Schemas (app/api/schemas) and delegate execution to the WorkflowService.Python# app/api/v1/endpoints/submission.py
+from fastapi import APIRouter, UploadFile, Depends, BackgroundTasks, HTTPException
+from app.services.workflow_service import WorkflowService
+from app.api.dependencies import get_workflow_service
+from app.api.schemas.response import ProcessingStatus
+
+router = APIRouter()
+
+@router.post("/process", response_model=ProcessingStatus)
+async def process_datasheet(
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    service: WorkflowService = Depends(get_workflow_service)
+):
     """
-    The Single Source of Truth for the LangGraph workflow.
+    Accepts a PDF, validates it, and triggers the LangGraph workflow in the background.
+    Returns a Job ID for polling.
     """
-    # 1. Raw Ingestion Artifacts
-    pdf_chunks: List = Field(default_factory=list)
-    schematic_image_path: Optional[str] = None
+    # 1. Validate File Type
+    if file.content_type != "application/pdf":
+        raise HTTPException(400, "Only PDF files are supported")
+
+    # 2. Trigger Workflow
+    job_id = await service.submit_job(file)
+
+    return ProcessingStatus(job_id=job_id, status="queued")
+7.2 Configuration InjectionWe strictly avoid os.getenv in business logic. All configuration is managed via pydantic-settings.Python# app/infrastructure/config/settings.py
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    DIGIKEY_CLIENT_ID: str
+    DIGIKEY_CLIENT_SECRET: str
+    OPENAI_API_KEY: str
+    MARKER_ARTIFACT_DIR: str = "/tmp/marker_artifacts"
     
-    # 2. Extracted Knowledge (The "Context")
-    extracted_constants: Dict[str, ExtractedConstant] = Field(
-        default_factory=dict,
-        description="Map of standard names to extracted values"
-    )
-    design_equations: List[ExtractedEquation] = Field(
-        default_factory=list,
-        description="All formulas extracted from Application Information"
-    )
-    
-    # 3. User Constraints & Interaction (The "Requirements")
-    user_inputs: Dict[str, float] = Field(
-        default_factory=dict,
-        description="User-defined constraints, e.g., {'V_out': 5.0}"
-    )
-    missing_variables: List[str] = Field(
-        default_factory=list,
-        description="Variables preventing equation solution"
-    )
-    
-    # 4. Topology & Output (The "Design")
-    netlist_topology: Dict[str, List[str]] = Field(
-        default_factory=dict,
-        description="Adjacency list representation of the circuit"
-    )
-    abstract_netlist: List[Component] = Field(default_factory=list)
-    calculated_bom: Dict[str, float] = Field(
-        default_factory=dict,
-        description="Final computed values for passives"
-    )
-    
-    # 5. Graph Control State
-    messages: Annotated[List[Any], merge_messages]
-    next_node: Optional[str] = None
-    error_log: List[str] = Field(default_factory=list)
-2.3. Node Definitions and Agent LogicThe architecture decomposes the transcription task into seven distinct cognitive nodes. Each node uses a specific LLM prompt strategy and toolset.Node A: Ingestion SupervisorRole: The Router.The Ingestion Supervisor is the entry point. It receives the semantically filtered content (discussed in Part 2). Its primary responsibility is not extraction, but routing strategy.Logic: It scans the input chunks for visual markers (references to Figure X) versus tabular markers (Electrical Characteristics).Decision:If a reference design schematic is detected (via metadata from the PDF parser), it routes to the Vision Agent.Simultaneously, it routes text chunks containing tables to the Constants Miner.It routes text chunks containing prose to the Equation Extractor.Orchestration: This node utilizes the "Supervisor" pattern described in research snippet 1, managing parallel execution branches to minimize total latency.Node B: Vision Agent (Multimodal)Role: The Topology Mapper.This agent is responsible for converting a raster image of the schematic into a structured netlist.Model: GPT-4o or Claude-3.5-Vision. Research snippet 2 indicates that vision-language models (VLMs) are increasingly capable of this, but require specific prompting to avoid hallucinations.Process:Preprocessing: The image is converted to high-contrast grayscale to enhance pin numbers and labels.Prompting: The prompt instructs the VLM to act as a "Netlist Extractor." It must list every component, its Reference Designator (e.g., R1, C1), and exactly which nets (wires) connect to its pins.Normalization: The output is parsed into the Component Pydantic model. If the VLM identifies a resistor as "Resistor connected to pin 3," the agent assigns a temporary ID (e.g., R_Unknown_1) and flags it for reconciliation with the calculated_bom later.Output: Updates netlist_topology and abstract_netlist in GraphState.Node C: Constants MinerRole: The Fact Retriever.This agent focuses on the "Electrical Characteristics" tables.Challenge: PDF tables are often multi-column or span across pages. Simple text extraction destroys row alignment.Strategy: We employ a specialized "Table-to-JSON" tool (using the gmft or unstructured library) before passing data to the LLM.Logic: The LLM receives the JSON representation of the table. It is prompted with a schema of "Standard Variables" (e.g., V_ref, I_sw_limit, V_uvlo). It must scan the rows for synonyms (e.g., "Feedback Voltage" $\rightarrow$ V_ref) and extract the "Typical" value.Validation: It performs a unit check. If the column header says "mV" and the value is "600", it must convert to "0.6" Volts to maintain SI unit consistency in the extracted_constants map.Node D: Equation ExtractorRole: The Mathematician (Formulator).This agent scans the "Application Information" section.Logic: It looks for patterns indicating design procedures. For a Buck Converter, it seeks the formula for the feedback divider network.Extraction: It extracts the raw LaTeX string and attempts to convert it to a Python lambda string.Context Awareness: It must capture the surrounding text to define the variables. If the text says "Where R1 is the high-side resistor," this mapping is crucial for the Math Engineer.Node E: The "Math Engineer" (Code Generator)Role: The Python Developer.This is the Core Technical Constraint solver. This agent does not calculate. It writes code.Input: It reads extracted_constants (e.g., $V_{ref}=0.8$), user_inputs (e.g., $V_{out}=3.3$), and design_equations.Reasoning:Constructs a dependency graph. To solve for $R_2$, do I have $R_1$, $V_{out}$, and $V_{ref}$?If $R_1$ is a free variable (common in feedback dividers), the agent writes code to select a standard value (e.g., $10k\Omega$) and then solves for $R_2$.Missing Data Check: If the equation requires L_target (Inductance) but the user hasn't provided it, the Math Engineer stops code generation and updates GraphState.missing_variables. It then transitions the graph to the HITL Node.Output: A complete, self-contained Python script.Node F: The "Executor" (Tool Node)Role: The Sandbox.Implementation: This node executes the script from the Math Engineer.Security: As highlighted in 3 and 4, executing LLM-generated code locally is a security risk. We utilize E2B (E2B Code Interpreter) for secure, ephemeral sandboxing.Process:Instantiates an E2B sandbox session.Uploads the script.Executes and captures stdout.Parses the JSON result from stdout (e.g., {"R1": 10000, "R2": 32400}).Updates calculated_bom in the state.Node G: Human-in-the-Loop NodeRole: The Interrupter.Logic: If the graph transitions here (from Math Engineer), it triggers a LangGraph Interrupt (5).State Persistence: The current GraphState is saved to the Postgres checkpointer.API Response: The HTTP request handling the initial job returns a specific status code (e.g., 202 Accepted or a custom 422 Input Required) with the list of missing_variables.Resume: When the user calls the /resume endpoint with the missing data, the graph restores state, updates user_inputs, and transitions back to the Math Engineer.3. Part 2: Data Ingestion & Chunking StrategyHandling 60-page datasheets with multi-column scientific layouts is a non-trivial engineering challenge. Standard text extraction often yields "garbage" when faced with complex layouts, leading to poor LLM performance.3.1. PDF Parsing Stack: The Scientific Layout ChallengeWe evaluated three primary approaches based on research snippets 7, and 9:FeatureUnstructuredPyMuPDF (fitz)Marker (marker-pdf)SpeedSlow (OCR heavy)Blazing FastModerate (Model inference)Multi-column SupportGood (Layout analysis)Poor (Linear text stream)Excellent (Trained for it)Equation ExtractionWeakNone (Raw characters)Excellent (LaTeX conversion)Table ExtractionModerateBasicGood (Markdown tables)RecommendationFallbackMetadata/Images onlyPrimary EngineSelected Stack: Marker (marker-pdf)We select Marker as the primary parsing engine. Unlike traditional OCR, Marker uses a multimodal model pipeline specifically trained on scientific papers and textbooks. It excels at identifying reading order in multi-column layouts and, crucially, converts mathematical formulas directly into LaTeX format. This aligns perfectly with our need to extract design_equations.Fallback: If Marker fails (low confidence score), we fall back to Unstructured, which uses Tesseract OCR and LayoutLM models for robust but slower extraction. PyMuPDF is retained solely for identifying and cropping the schematic_image_path since it allows precise coordinate-based image extraction.3.2. Semantic Routing: The "Needle in a Haystack"Processing the entire PDF (often 60+ pages) wastes tokens and introduces noise (e.g., "Tape and Reel Information" or "Package Dimensions"). We must route the LLM only to relevant sections.Strategy: Two-Stage Semantic FilteringStage 1: Heuristic Keyword Filtering (The Fast Pass)We parse the Table of Contents (TOC) if available.We scan page headers/footers for high-value keywords: ``.This reduces the document from 60 pages to ~10 high-probability pages.Stage 2: Embedding-Based Vector Routing (The Smart Pass)We utilize OpenAI's text-embedding-3-small to generate vectors for the candidate pages.We compare these vectors against a pre-computed "Anchor Set" of embeddings derived from known "Golden Datasheets" (e.g., embeddings of the Application Information section of a standard TI datasheet).Snippet Insight: Research snippet 10 and 11 suggest that semantic routing significantly improves RAG performance by filtering irrelevant context.Thresholding: Only chunks with a cosine similarity > 0.75 are passed to the LangGraph agents.3.3. Chunking Strategy: Context PreservationStandard fixed-size chunking (e.g., 500 characters) is disastrous for equations, often splitting the formula ($V_{out} =...$) from the variable definitions ($Where V_{out} is...$).Selected Strategy: Semantic ChunkingWe implement the Semantic Chunking strategy described in 12 and.13Sentence Splitting: The text is first split into sentences.Semantic Coherence: We calculate the cosine distance between the embeddings of adjacent sentences.Boundary Detection: If the distance exceeds a threshold (indicating a shift in topic), a chunk boundary is created.Result: This ensures that a "Design Procedure" paragraph and its associated equations remain in the same chunk, providing the EquationExtractor with complete context.4. Part 3: The API Architecture (FastAPI + Async)The interactive nature of the application (HITL) and the long latency of LLM chains necessitate a fully asynchronous API architecture.4.1. Asynchronous Design PrinciplesWe utilize FastAPI running on an ASGI server (Uvicorn). All database interactions and LLM calls are await-ed to ensure the event loop remains non-blocking. This allows a single server instance to handle hundreds of concurrent datasheet processing jobs.4.2. Endpoint Definition1. POST /analyzeInitiates the datasheet processing job.Request: multipart/form-data with the PDF file and a JSON string for user_constraints.Behavior:Persists the uploaded PDF to object storage (S3/MinIO).Creates a Job record in PostgreSQL with status PENDING.Initializes the GraphState with the file path.Dispatches the LangGraph execution to a background worker (via Celery or Redis Queue) to decouple processing from the HTTP response.Response: 202 Accepted containing a job_id.2. GET /jobs/{job_id}/stream (SSE)Provides real-time visibility into the "Brain's" thinking process.Technology: Server-Sent Events (SSE). As noted in 14 and 15, SSE is superior to WebSockets for unidirectional status updates due to simpler protocol overhead and better firewall traversal.Implementation:The endpoint yields a generator that subscribes to the LangGraph event stream (graph.astream_events).Events are formatted as structured JSON messages:JSONevent: agent_update
-data: {
-  "node": "ConstantsMiner",
-  "status": "extracting",
-  "message": "Found V_ref = 0.8V in Table 3."
+    # Marker Settings
+    TORCH_DEVICE: str = "cuda" # or "cpu"
+
+    model_config = {"env_file": ".env"}
+8. Quality Assurance and Evaluation StrategyA non-deterministic system requires a rigorous, data-driven testing strategy. We implement the "Test Pyramid" with a specific focus on evaluating the Agentic components.8.1 The Golden Dataset (Agent Evaluation)Mocking LLMs is insufficient for testing reasoning capabilities. We require a Golden Dataset—a curated set of PDFs with known ground-truth outputs.Dataset Creation Protocol:Selection: Curate 20 diverse datasheets (e.g., TI Buck Converters, ADI OpAmps, Wurth Transformers).Labeling: Manually extract the BOM into a canonical JSON format. Manually annotate the bounding boxes for specific components using a labeling tool (e.g., Label Studio).Regression Testing:Run the pipeline against the dataset.Metric 1: Extraction F1 Score: Compare extracted TraceableComponents against ground truth. (Did we find R1? Is it 10k?).Metric 2: Traceability IoU: Calculate the Intersection over Union (IoU) for the bounding boxes.$IoU = \frac{Area(Predicted \cap GroundTruth)}{Area(Predicted \cup GroundTruth)}$Pass Criteria: $IoU > 0.5$. This confirms the agent isn't just getting the value right, but is looking at the correct location on the page.8.2 Integration Tests with VCRpyThe DigiKey API is external, rate-limited, and slow. We use vcrpy to record HTTP interactions into "cassettes." This makes integration tests deterministic and fast, allowing us to test the ResolutionAgent logic without spamming the live API.Python# tests/integration/test_sourcing.py
+import pytest
+import vcr
+from app.services.sourcing_service import SourcingService
+from app.domain.entities.component import ComponentSpec
+
+@vcr.use_cassette('fixtures/cassettes/digikey_search_10k.yaml')
+async def test_sourcing_resolution(sourcing_service):
+    """
+    Tests that the service correctly maps '10k resistor' to a specific MPN
+    using the recorded API response.
+    """
+    spec = ComponentSpec(resistance_ohms=10000, package_case="0603")
+    result = await sourcing_service.find_best_match(spec)
+    assert result.mpn is not None
+    assert "RES" in result.description
+9. ConclusionThis architecture represents a disciplined approach to a complex, unstructured problem. By combining marker-pdf's layout-aware ingestion, LangGraph's cyclic reasoning capabilities, and Pydantic's strict validation, we create a system that does not merely guess at schematic connectivity but provides evidence-backed design generation. The strict adherence to Clean Architecture ensures that the system remains maintainable and testable, while the Traceability requirement ensures it is trustworthy enough for professional engineering workflows.Works citedWorkflows and agents - Docs by LangChain, accessed December 20, 2025, https://docs.langchain.com/oss/python/langgraph/workflows-agentsThinking in LangGraph - Docs by LangChain, accessed December 20, 2025, https://docs.langchain.com/oss/python/langgraph/thinking-in-langgraphdatalab-to/marker: Convert PDF to markdown + JSON quickly with high accuracy - GitHub, accessed December 20, 2025, https://github.com/datalab-to/markermarker-pdf 0.3.2 - PyPI, accessed December 20, 2025, https://pypi.org/project/marker-pdf/0.3.2/datalab-to/surya: OCR, layout analysis, reading order, table recognition in 90+ languages - GitHub, accessed December 20, 2025, https://github.com/datalab-to/suryaKicad-sch-api: Python library for KiCAD schematic manipulation - External Plugins, accessed December 20, 2025, https://forum.kicad.info/t/kicad-sch-api-python-library-for-kicad-schematic-manipulation/65363Kicad-sch-api: Python library for KiCAD schematic manipulation - Reddit, accessed December 20, 2025, https://www.reddit.com/r/KiCad/comments/1os7y1n/kicadschapi_python_library_for_kicad_schematic/A Guide to Bounding Box Formats and How to Draw Them - learnml.io, accessed December 20, 2025, https://www.learnml.io/posts/a-guide-to-bounding-box-formats/OCR cannot recognize the image. · Issue #658 · datalab-to/marker - GitHub, accessed December 20, 2025, https://github.com/VikParuchuri/marker/issues/658Using the API - Datalab Documentation, accessed December 20, 2025, https://documentation.datalab.to/docs/recipes/table-recognition/table-rec-api-overviewcircuit-synth/kicad-sch-api: API for manipulating sexpr in KiCAD schematic editor - GitHub, accessed December 20, 2025, https://github.com/circuit-synth/kicad-sch-apikicad-sch-api - PyPI, accessed December 20, 2025, https://pypi.org/project/kicad-sch-api/RAG evaluation metrics: How to evaluate your RAG pipeline with Braintrust - Articles, accessed December 20, 2025, https://www.braintrust.dev/articles/rag-evaluation-metricsBuilding a "Golden Dataset" for AI Evaluation: A Step-by-Step Guide - Maxim AI, accessed December 20, 2025, https://www.getmaxim.ai/articles/building-a-golden-dataset-for-ai-evaluation-a-step-by-step-guide/Enhancing Bounding Box Regression for Object Detection: Dimensional Angle Precision IoU-Loss - ResearchGate, accessed December 20, 2025, https://www.researchgate.net/publication/391528309_Enhancing_Bounding_Box_Regression_for_Object_Detection_Dimensional_Angle_Precision_IoU-LossIntersection over Union (IoU): Definition, Calculation, Code - V7 Go, accessed December 20, 2025, https://www.v7labs.com/blog/intersection-over-union-guide
+
+
+Marker PDF
+
+# Marker
+
+Marker converts documents to markdown, JSON, chunks, and HTML quickly and accurately.
+
+- Converts PDF, image, PPTX, DOCX, XLSX, HTML, EPUB files in all languages
+- Formats tables, forms, equations, inline math, links, references, and code blocks
+- Extracts and saves images
+- Removes headers/footers/other artifacts
+- Extensible with your own formatting and logic
+- Does structured extraction, given a JSON schema (beta)
+- Optionally boost accuracy with LLMs (and your own prompt)
+- Works on GPU, CPU, or MPS
+
+For our managed API or on-prem document intelligence solution, check out [our platform here](https://datalab.to?utm_source=gh-marker).
+
+## Performance
+
+<img src="data/images/overall.png" width="800px"/>
+
+Marker benchmarks favorably compared to cloud services like Llamaparse and Mathpix, as well as other open source tools.
+
+The above results are running single PDF pages serially.  Marker is significantly faster when running in batch mode, with a projected throughput of 25 pages/second on an H100.
+
+See [below](#benchmarks) for detailed speed and accuracy benchmarks, and instructions on how to run your own benchmarks.
+
+## Hybrid Mode
+
+For the highest accuracy, pass the `--use_llm` flag to use an LLM alongside marker.  This will do things like merge tables across pages, handle inline math, format tables properly, and extract values from forms.  It can use any gemini or ollama model.  By default, it uses `gemini-2.0-flash`.  See [below](#llm-services) for details.
+
+Here is a table benchmark comparing marker, gemini flash alone, and marker with use_llm:
+
+<img src="data/images/table.png" width="400px"/>
+
+As you can see, the use_llm mode offers higher accuracy than marker or gemini alone.
+
+## Examples
+
+| PDF | File type | Markdown                                                                                                                     | JSON                                                                                                   |
+|-----|-----------|------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| [Think Python](https://greenteapress.com/thinkpython/thinkpython.pdf) | Textbook | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/markdown/thinkpython/thinkpython.md)                 | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/json/thinkpython.json)         |
+| [Switch Transformers](https://arxiv.org/pdf/2101.03961.pdf) | arXiv paper | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/markdown/switch_transformers/switch_trans.md) | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/json/switch_trans.json) |
+| [Multi-column CNN](https://arxiv.org/pdf/1804.07821.pdf) | arXiv paper | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/markdown/multicolcnn/multicolcnn.md)                 | [View](https://github.com/VikParuchuri/marker/blob/master/data/examples/json/multicolcnn.json)         |
+
+# Commercial usage
+
+Our model weights use a modified AI Pubs Open Rail-M license (free for research, personal use, and startups under $2M funding/revenue) and our code is GPL. For broader commercial licensing or to remove GPL requirements, visit our pricing page [here](https://www.datalab.to/pricing?utm_source=gh-marker).
+
+# Hosted API & On-prem
+
+There's a [hosted API](https://www.datalab.to?utm_source=gh-marker) and [painless on-prem solution](https://www.datalab.to/blog/self-serve-on-prem-licensing) for marker - it's free to sign up, and we'll throw in credits for you to test it out.
+
+The API:
+- Supports PDF, image, PPT, PPTX, DOC, DOCX, XLS, XLSX, HTML, EPUB files
+- Is 1/4th the price of leading cloud-based competitors
+- Fast - ~15s for a 250 page PDF
+- Supports LLM mode
+- High uptime (99.99%)
+
+# Community
+
+[Discord](https://discord.gg//KuZwXNGnfH) is where we discuss future development.
+
+# Installation
+
+You'll need python 3.10+ and [PyTorch](https://pytorch.org/get-started/locally/).
+
+Install with:
+
+```shell
+pip install marker-pdf
+```
+
+If you want to use marker on documents other than PDFs, you will need to install additional dependencies with:
+
+```shell
+pip install marker-pdf[full]
+```
+
+# Usage
+
+First, some configuration:
+
+- Your torch device will be automatically detected, but you can override this.  For example, `TORCH_DEVICE=cuda`.
+- Some PDFs, even digital ones, have bad text in them.  Set `--force_ocr` to force OCR on all lines, or the `strip_existing_ocr` to keep all digital text, and strip out any existing OCR text.
+- If you care about inline math, set `force_ocr` to convert inline math to LaTeX.
+
+## Interactive App
+
+I've included a streamlit app that lets you interactively try marker with some basic options.  Run it with:
+
+```shell
+pip install streamlit streamlit-ace
+marker_gui
+```
+
+## Convert a single file
+
+```shell
+marker_single /path/to/file.pdf
+```
+
+You can pass in PDFs or images.
+
+Options:
+- `--page_range TEXT`: Specify which pages to process. Accepts comma-separated page numbers and ranges. Example: `--page_range "0,5-10,20"` will process pages 0, 5 through 10, and page 20.
+- `--output_format [markdown|json|html|chunks]`: Specify the format for the output results.
+- `--output_dir PATH`: Directory where output files will be saved. Defaults to the value specified in settings.OUTPUT_DIR.
+- `--paginate_output`: Paginates the output, using `\n\n{PAGE_NUMBER}` followed by `-` * 48, then `\n\n`
+- `--use_llm`: Uses an LLM to improve accuracy.  You will need to configure the LLM backend - see [below](#llm-services).
+- `--force_ocr`: Force OCR processing on the entire document, even for pages that might contain extractable text.  This will also format inline math properly.
+- `--block_correction_prompt`: if LLM mode is active, an optional prompt that will be used to correct the output of marker.  This is useful for custom formatting or logic that you want to apply to the output.
+- `--strip_existing_ocr`: Remove all existing OCR text in the document and re-OCR with surya.
+- `--redo_inline_math`: If you want the absolute highest quality inline math conversion, use this along with `--use_llm`.
+- `--disable_image_extraction`: Don't extract images from the PDF.  If you also specify `--use_llm`, then images will be replaced with a description.
+- `--debug`: Enable debug mode for additional logging and diagnostic information.
+- `--processors TEXT`: Override the default processors by providing their full module paths, separated by commas. Example: `--processors "module1.processor1,module2.processor2"`
+- `--config_json PATH`: Path to a JSON configuration file containing additional settings.
+- `config --help`: List all available builders, processors, and converters, and their associated configuration.  These values can be used to build a JSON configuration file for additional tweaking of marker defaults.
+- `--converter_cls`: One of `marker.converters.pdf.PdfConverter` (default) or `marker.converters.table.TableConverter`.  The `PdfConverter` will convert the whole PDF, the `TableConverter` will only extract and convert tables.
+- `--llm_service`: Which llm service to use if `--use_llm` is passed.  This defaults to `marker.services.gemini.GoogleGeminiService`.
+- `--help`: see all of the flags that can be passed into marker.  (it supports many more options then are listed above)
+
+The list of supported languages for surya OCR is [here](https://github.com/VikParuchuri/surya/blob/master/surya/recognition/languages.py).  If you don't need OCR, marker can work with any language.
+
+## Convert multiple files
+
+```shell
+marker /path/to/input/folder
+```
+
+- `marker` supports all the same options from `marker_single` above.
+- `--workers` is the number of conversion workers to run simultaneously.  This is automatically set by default, but you can increase it to increase throughput, at the cost of more CPU/GPU usage.  Marker will use 5GB of VRAM per worker at the peak, and 3.5GB average.
+
+## Convert multiple files on multiple GPUs
+
+```shell
+NUM_DEVICES=4 NUM_WORKERS=15 marker_chunk_convert ../pdf_in ../md_out
+```
+
+- `NUM_DEVICES` is the number of GPUs to use.  Should be `2` or greater.
+- `NUM_WORKERS` is the number of parallel processes to run on each GPU.
+
+## Use from python
+
+See the `PdfConverter` class at `marker/converters/pdf.py` function for additional arguments that can be passed.
+
+```python
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.output import text_from_rendered
+
+converter = PdfConverter(
+    artifact_dict=create_model_dict(),
+)
+rendered = converter("FILEPATH")
+text, _, images = text_from_rendered(rendered)
+```
+
+`rendered` will be a pydantic basemodel with different properties depending on the output type requested.  With markdown output (default), you'll have the properties `markdown`, `metadata`, and `images`.  For json output, you'll have `children`, `block_type`, and `metadata`.
+
+### Custom configuration
+
+You can pass configuration using the `ConfigParser`.  To see all available options, do `marker_single --help`.
+
+```python
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.config.parser import ConfigParser
+
+config = {
+    "output_format": "json",
+    "ADDITIONAL_KEY": "VALUE"
 }
-Interrupt Handling: If the graph hits the HITL node, an event of type interrupt is sent, prompting the frontend to display a form for the missing variables.3. POST /jobs/{job_id}/resumeHandles user input for HITL scenarios.Payload: {"missing_variables": {"L_target": 2.2e-6}}.Behavior:Retrieves the suspended graph state from the checkpointer using job_id as the thread ID.Updates the state with the provided values.Commands the graph to resume execution (6).4.3. Final JSON Payload SchemaThe frontend receives this payload to render the interactive BOM and download the KiCad files.JSON{
-  "job_id": "uuid",
-  "status": "COMPLETED",
-  "metadata": {
-    "device_name": "TPS62125",
-    "datasheet_title": "3V-17V Step-Down Converter"
-  },
-  "design_parameters": {
-    "V_in": 12.0,
-    "V_out": 3.3,
-    "I_out_max": 0.5
-  },
-  "circuit_design": {
-    "schematic_nodes":},
-      {"ref": "R1", "lib": "R", "value": "100k", "pos": },
-      {"ref": "R2", "lib": "R", "value": "32.4k", "pos": }
-    ],
-    "nets":},
-      {"name": "VOUT", "connections":}
+config_parser = ConfigParser(config)
+
+converter = PdfConverter(
+    config=config_parser.generate_config_dict(),
+    artifact_dict=create_model_dict(),
+    processor_list=config_parser.get_processors(),
+    renderer=config_parser.get_renderer(),
+    llm_service=config_parser.get_llm_service()
+)
+rendered = converter("FILEPATH")
+```
+
+### Extract blocks
+
+Each document consists of one or more pages.  Pages contain blocks, which can themselves contain other blocks.  It's possible to programmatically manipulate these blocks.
+
+Here's an example of extracting all forms from a document:
+
+```python
+from marker.converters.pdf import PdfConverter
+from marker.models import create_model_dict
+from marker.schema import BlockTypes
+
+converter = PdfConverter(
+    artifact_dict=create_model_dict(),
+)
+document = converter.build_document("FILEPATH")
+forms = document.contained_blocks((BlockTypes.Form,))
+```
+
+Look at the processors for more examples of extracting and manipulating blocks.
+
+## Other converters
+
+You can also use other converters that define different conversion pipelines:
+
+### Extract tables
+
+The `TableConverter` will only convert and extract tables:
+
+```python
+from marker.converters.table import TableConverter
+from marker.models import create_model_dict
+from marker.output import text_from_rendered
+
+converter = TableConverter(
+    artifact_dict=create_model_dict(),
+)
+rendered = converter("FILEPATH")
+text, _, images = text_from_rendered(rendered)
+```
+
+This takes all the same configuration as the PdfConverter.  You can specify the configuration `force_layout_block=Table` to avoid layout detection and instead assume every page is a table.  Set `output_format=json` to also get cell bounding boxes.
+
+You can also run this via the CLI with
+```shell
+marker_single FILENAME --use_llm --force_layout_block Table --converter_cls marker.converters.table.TableConverter --output_format json
+```
+
+### OCR Only
+
+If you only want to run OCR, you can also do that through the `OCRConverter`.  Set `--keep_chars` to keep individual characters and bounding boxes.
+
+```python
+from marker.converters.ocr import OCRConverter
+from marker.models import create_model_dict
+
+converter = OCRConverter(
+    artifact_dict=create_model_dict(),
+)
+rendered = converter("FILEPATH")
+```
+
+This takes all the same configuration as the PdfConverter.
+
+You can also run this via the CLI with
+```shell
+marker_single FILENAME --converter_cls marker.converters.ocr.OCRConverter
+```
+
+### Structured Extraction (beta)
+
+You can run structured extraction via the `ExtractionConverter`.  This requires an llm service to be setup first (see [here](#llm-services) for details).  You'll get a JSON output with the extracted values.
+
+```python
+from marker.converters.extraction import ExtractionConverter
+from marker.models import create_model_dict
+from marker.config.parser import ConfigParser
+from pydantic import BaseModel
+
+class Links(BaseModel):
+    links: list[str]
+
+schema = Links.model_json_schema()
+config_parser = ConfigParser({
+    "page_schema": schema
+})
+
+converter = ExtractionConverter(
+    artifact_dict=create_model_dict(),
+    config=config_parser.generate_config_dict(),
+    llm_service=config_parser.get_llm_service(),
+)
+rendered = converter("FILEPATH")
+```
+
+Rendered will have an `original_markdown` field.  If you pass this back in next time you run the converter, as the `existing_markdown` config key, you can skip re-parsing the document.
+
+# Output Formats
+
+## Markdown
+
+Markdown output will include:
+
+- image links (images will be saved in the same folder)
+- formatted tables
+- embedded LaTeX equations (fenced with `$$`)
+- Code is fenced with triple backticks
+- Superscripts for footnotes
+
+## HTML
+
+HTML output is similar to markdown output:
+
+- Images are included via `img` tags
+- equations are fenced with `<math>` tags
+- code is in `pre` tags
+
+## JSON
+
+JSON output will be organized in a tree-like structure, with the leaf nodes being blocks.  Examples of leaf nodes are a single list item, a paragraph of text, or an image.
+
+The output will be a list, with each list item representing a page.  Each page is considered a block in the internal marker schema.  There are different types of blocks to represent different elements.
+
+Pages have the keys:
+
+- `id` - unique id for the block.
+- `block_type` - the type of block. The possible block types can be seen in `marker/schema/__init__.py`.  As of this writing, they are ["Line", "Span", "FigureGroup", "TableGroup", "ListGroup", "PictureGroup", "Page", "Caption", "Code", "Figure", "Footnote", "Form", "Equation", "Handwriting", "TextInlineMath", "ListItem", "PageFooter", "PageHeader", "Picture", "SectionHeader", "Table", "Text", "TableOfContents", "Document"]
+- `html` - the HTML for the page.  Note that this will have recursive references to children.  The `content-ref` tags must be replaced with the child content if you want the full html.  You can see an example of this at `marker/output.py:json_to_html`.  That function will take in a single block from the json output, and turn it into HTML.
+- `polygon` - the 4-corner polygon of the page, in (x1,y1), (x2,y2), (x3, y3), (x4, y4) format.  (x1,y1) is the top left, and coordinates go clockwise.
+- `children` - the child blocks.
+
+The child blocks have two additional keys:
+
+- `section_hierarchy` - indicates the sections that the block is part of.  `1` indicates an h1 tag, `2` an h2, and so on.
+- `images` - base64 encoded images.  The key will be the block id, and the data will be the encoded image.
+
+Note that child blocks of pages can have their own children as well (a tree structure).
+
+```json
+{
+      "id": "/page/10/Page/366",
+      "block_type": "Page",
+      "html": "<content-ref src='/page/10/SectionHeader/0'></content-ref><content-ref src='/page/10/SectionHeader/1'></content-ref><content-ref src='/page/10/Text/2'></content-ref><content-ref src='/page/10/Text/3'></content-ref><content-ref src='/page/10/Figure/4'></content-ref><content-ref src='/page/10/SectionHeader/5'></content-ref><content-ref src='/page/10/SectionHeader/6'></content-ref><content-ref src='/page/10/TextInlineMath/7'></content-ref><content-ref src='/page/10/TextInlineMath/8'></content-ref><content-ref src='/page/10/Table/9'></content-ref><content-ref src='/page/10/SectionHeader/10'></content-ref><content-ref src='/page/10/Text/11'></content-ref>",
+      "polygon": [[0.0, 0.0], [612.0, 0.0], [612.0, 792.0], [0.0, 792.0]],
+      "children": [
+        {
+          "id": "/page/10/SectionHeader/0",
+          "block_type": "SectionHeader",
+          "html": "<h1>Supplementary Material for <i>Subspace Adversarial Training</i> </h1>",
+          "polygon": [
+            [217.845703125, 80.630859375], [374.73046875, 80.630859375],
+            [374.73046875, 107.0],
+            [217.845703125, 107.0]
+          ],
+          "children": null,
+          "section_hierarchy": {
+            "1": "/page/10/SectionHeader/1"
+          },
+          "images": {}
+        },
+        ...
+        ]
+    }
+
+
+```
+
+## Chunks
+
+Chunks format is similar to JSON, but flattens everything into a single list instead of a tree.  Only the top level blocks from each page show up. It also has the full HTML of each block inside, so you don't need to crawl the tree to reconstruct it.  This enable flexible and easy chunking for RAG.
+
+## Metadata
+
+All output formats will return a metadata dictionary, with the following fields:
+
+```json
+{
+    "table_of_contents": [
+      {
+        "title": "Introduction",
+        "heading_level": 1,
+        "page_id": 0,
+        "polygon": [...]
+      }
+    ], // computed PDF table of contents
+    "page_stats": [
+      {
+        "page_id":  0,
+        "text_extraction_method": "pdftext",
+        "block_counts": [("Span", 200), ...]
+      },
+      ...
     ]
-  },
-  "bom":,
-  "download_links": {
-    "kicad_sch": "/jobs/{job_id}/artifacts/schematic.kicad_sch"
-  }
 }
-5. Part 4: KiCad S-Expression GenerationThe final artifact is a .kicad_sch file. KiCad 6.0+ uses a Lisp-based S-Expression format. Generating this programmatically requires strict adherence to the file format specification (16).5.1. Generation Strategy: The "Abstract to Concrete" BridgeThe Vision Agent provides an Abstract Netlist (topology), and the Math Engineer provides the Values. The KiCad Generator must merge these and add Spatial Geometry.Symbol Mapping: We maintain a mapping database of generic symbols (Device:R, Device:C, Device:L). For the specific IC, we generate a "rectangle symbol" on the fly using KiCad's symbol library format, creating pins based on the netlist data.Auto-Placement: We use networkx to model the netlist as a graph. We apply a planar layout algorithm or a force-directed layout to determine relative $(x, y)$ coordinates for components, ensuring that the FB (Feedback) network is visually close to the FB pin of the IC.UUID Generation: KiCad 7+ requires every symbol and pin to have a unique UUID. We use Python's uuid library to generate these deterministically based on the reference designator to ensure file stability across regenerations.5.2. Python Implementation SnippetBelow is a robust implementation for generating a Resistor S-Expression. This code adheres to the grammar defined in 16 and.17Pythonimport uuid
+```
 
-def create_kicad_resistor(
-    ref_des: str, 
-    value: str, 
-    x_pos: float, 
-    y_pos: float, 
-    rotation: int = 0
-) -> str:
-    """
-    Generates a KiCad 7.0+ S-Expression string for a resistor component.
-    
-    Args:
-        ref_des (str): Reference Designator, e.g., "R1"
-        value (str): Component Value, e.g., "10k"
-        x_pos, y_pos (float): Coordinates in mm.
-        rotation (int): Rotation in degrees (0, 90, 180, 270).
-        
-    Returns:
-        str: Formatted S-Expression block.
-    """
-    # Deterministic UUID generation for reproducibility
-    # Using specific namespace ensures R1 always gets the same UUID if re-generated
-    comp_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"{ref_des}_{value}")
-    
-    # KiCad uses 'at' for position: (at x y rotation)
-    at_expr = f"(at {x_pos:.2f} {y_pos:.2f} {rotation})"
-    
-    # Text effects for visibility
-    font_effects = "(effects (font (size 1.27 1.27)) (justify left))"
-    
-    # S-Expression Template
-    # lib_id "Device:R" is the standard KiCad library reference for a resistor
-    sexpr = f"""
-    (symbol (lib_id "Device:R") {at_expr} (unit 1)
-      (in_bom yes) (on_board yes) (dnp no)
-      (uuid "{str(comp_uuid)}")
-      (property "Reference" "{ref_des}" (at {x_pos:.2f} {y_pos-2.54:.2f} 0)
-        {font_effects}
-      )
-      (property "Value" "{value}" (at {x_pos:.2f} {y_pos+2.54:.2f} 0)
-        {font_effects}
-      )
-      (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at {x_pos:.2f} {y_pos:.2f} 0)
-        (effects (font (size 1.27 1.27)) hide)
-      )
-      ;; Pins must also have UUIDs. We generate them derived from the component UUID.
-      (pin "1" (uuid "{uuid.uuid5(comp_uuid, 'pin1')}"))
-      (pin "2" (uuid "{uuid.uuid5(comp_uuid, 'pin2')}"))
-    )
-    """
-    return sexpr.strip()
+# LLM Services
 
-# Example Usage
-print(create_kicad_resistor("R_FB1", "49.9k", 120.0, 85.5, 90))
-6. Part 5: The "2025/2026 Backend Coding Standard"To ensure the longevity and maintainability of this complex multi-agent system, we enforce a rigorous coding standard. This is not merely a style guide but a set of architectural mandates.6.1. Type Safety & Validation (Pydantic V2)Mandate: Dynamic typing is forbidden for data exchange. All API inputs, database models, and LLM structured outputs must use Pydantic V2.Static Analysis: The CI pipeline will run mypy or pyright in strict mode.Reasoning: Pydantic V2 (written in Rust) offers significant performance improvements and validation correctness over V1. It acts as the "contract" between the deterministic code and the probabilistic LLM output.6.2. Asynchronous ConcurrencyMandate: All I/O-bound operations must be async.Rationale: The application is I/O heavy (PDF uploads, DB reads, external LLM API calls). Blocking code in the main thread is unacceptable.Framework: We use httpx for async HTTP client calls instead of requests.6.3. Observability: Structured LoggingTool: structlog.Philosophy: Logs are data, not text.Requirement: All logs must be emitted as JSON. Every request must be tagged with a trace_id (propagated via OpenTelemetry headers) to allow tracing a request from the API entry point, through the LangGraph nodes, to the E2B sandbox execution.Implementation:Pythonimport structlog
-log = structlog.get_logger()
+When running with the `--use_llm` flag, you have a choice of services you can use:
 
-# BAD
-log.info(f"Processing chunk {chunk_id}")
+- `Gemini` - this will use the Gemini developer API by default.  You'll need to pass `--gemini_api_key` to configuration.
+- `Google Vertex` - this will use vertex, which can be more reliable.  You'll need to pass `--vertex_project_id`.  To use it, set `--llm_service=marker.services.vertex.GoogleVertexService`.
+- `Ollama` - this will use local models.  You can configure `--ollama_base_url` and `--ollama_model`. To use it, set `--llm_service=marker.services.ollama.OllamaService`.
+- `Claude` - this will use the anthropic API.  You can configure `--claude_api_key`, and `--claude_model_name`.  To use it, set `--llm_service=marker.services.claude.ClaudeService`.
+- `OpenAI` - this supports any openai-like endpoint. You can configure `--openai_api_key`, `--openai_model`, and `--openai_base_url`. To use it, set `--llm_service=marker.services.openai.OpenAIService`.
+- `Azure OpenAI` - this uses the Azure OpenAI service. You can configure `--azure_endpoint`, `--azure_api_key`, and `--deployment_name`. To use it, set `--llm_service=marker.services.azure_openai.AzureOpenAIService`.
 
-# GOOD
-await log.ainfo("processing_chunk", chunk_id=chunk_id, page=5, confidence_score=0.92)
-6.4. Testing: Mocking the StochasticChallenge: Testing LLM applications is expensive and non-deterministic.Solution: We mandate Record/Replay Testing using vcr.py or pytest-recording.Process:Run the test suite once against the live OpenAI API. vcr.py records the HTTP interactions to a "cassette" (YAML file).In CI/CD, the tests run against the cassette. This ensures determinism and zero cost.Unit Tests: Use pytest-asyncio for all async components.6.5. Linting & FormattingTool: Ruff.Rationale: Ruff replaces the fragmented ecosystem of Black, Isort, and Flake8 with a single, ultra-fast Rust-based tool.Configuration:Ini, TOML# pyproject.toml
-[tool.ruff]
-line-length = 100
-target-version = "py311"
-[tool.ruff.lint]
-select = # Enforce strict rules
-6.6. Error HandlingPolicy: Zero 500 Errors.Implementation: A global exception handler middleware must intercept all errors.PDFParsingError -> 422 Unprocessable EntityLLMContextLimitError -> 503 Service UnavailableMissingVariableError -> Custom 400 Bad Request with missing_vars payload.7. ConclusionThis architecture represents a paradigm shift in EDA tooling. By acknowledging the limitations of LLMs and wrapping them in a robust LangGraph orchestration with Code Interpreter capabilities, we bridge the gap between unstructured text and rigorous engineering design. The use of Marker for ingestion, E2B for secure execution, and KiCad S-Expressions for output ensures that the system is not just a "demo" but a production-grade engineering assistant. The strict adherence to modern coding standards ensures that this "Brain" remains maintainable as it evolves to handle increasingly complex integrated circuits.
+These services may have additional optional configuration as well - you can see it by viewing the classes.
+
+# Internals
+
+Marker is easy to extend.  The core units of marker are:
+
+- `Providers`, at `marker/providers`.  These provide information from a source file, like a PDF.
+- `Builders`, at `marker/builders`.  These generate the initial document blocks and fill in text, using info from the providers.
+- `Processors`, at `marker/processors`.  These process specific blocks, for example the table formatter is a processor.
+- `Renderers`, at `marker/renderers`. These use the blocks to render output.
+- `Schema`, at `marker/schema`.  The classes for all the block types.
+- `Converters`, at `marker/converters`.  They run the whole end to end pipeline.
+
+To customize processing behavior, override the `processors`.  To add new output formats, write a new `renderer`.  For additional input formats, write a new `provider.`
+
+Processors and renderers can be directly passed into the base `PDFConverter`, so you can specify your own custom processing easily.
+
+## API server
+
+There is a very simple API server you can run like this:
+
+```shell
+pip install -U uvicorn fastapi python-multipart
+marker_server --port 8001
+```
+
+This will start a fastapi server that you can access at `localhost:8001`.  You can go to `localhost:8001/docs` to see the endpoint options.
+
+You can send requests like this:
+
+```
+import requests
+import json
+
+post_data = {
+    'filepath': 'FILEPATH',
+    # Add other params here
+}
+
+requests.post("http://localhost:8001/marker", data=json.dumps(post_data)).json()
+```
+
+Note that this is not a very robust API, and is only intended for small-scale use.  If you want to use this server, but want a more robust conversion option, you can use the hosted [Datalab API](https://www.datalab.to/plans).
+
+# Troubleshooting
+
+There are some settings that you may find useful if things aren't working the way you expect:
+
+- If you have issues with accuracy, try setting `--use_llm` to use an LLM to improve quality.  You must set `GOOGLE_API_KEY` to a Gemini API key for this to work.
+- Make sure to set `force_ocr` if you see garbled text - this will re-OCR the document.
+- `TORCH_DEVICE` - set this to force marker to use a given torch device for inference.
+- If you're getting out of memory errors, decrease worker count.  You can also try splitting up long PDFs into multiple files.
+
+## Debugging
+
+Pass the `debug` option to activate debug mode.  This will save images of each page with detected layout and text, as well as output a json file with additional bounding box information.
+
+# Benchmarks
+
+## Overall PDF Conversion
+
+We created a [benchmark set](https://huggingface.co/datasets/datalab-to/marker_benchmark) by extracting single PDF pages from common crawl.  We scored based on a heuristic that aligns text with ground truth text segments, and an LLM as a judge scoring method.
+
+| Method     | Avg Time | Heuristic Score | LLM Score |
+|------------|----------|-----------------|-----------|
+| marker     | 2.83837  | 95.6709         | 4.23916   |
+| llamaparse | 23.348   | 84.2442         | 3.97619   |
+| mathpix    | 6.36223  | 86.4281         | 4.15626   |
+| docling    | 3.69949  | 86.7073         | 3.70429   |
+
+Benchmarks were run on an H100 for markjer and docling - llamaparse and mathpix used their cloud services.  We can also look at it by document type:
+
+<img src="data/images/per_doc.png" width="1000px"/>
+
+| Document Type        | Marker heuristic | Marker LLM | Llamaparse Heuristic | Llamaparse LLM | Mathpix Heuristic | Mathpix LLM | Docling Heuristic | Docling LLM |
+|----------------------|------------------|------------|----------------------|----------------|-------------------|-------------|-------------------|-------------|
+| Scientific paper     | 96.6737          | 4.34899    | 87.1651              | 3.96421        | 91.2267           | 4.46861     | 92.135            | 3.72422     |
+| Book page            | 97.1846          | 4.16168    | 90.9532              | 4.07186        | 93.8886           | 4.35329     | 90.0556           | 3.64671     |
+| Other                | 95.1632          | 4.25076    | 81.1385              | 4.01835        | 79.6231           | 4.00306     | 83.8223           | 3.76147     |
+| Form                 | 88.0147          | 3.84663    | 66.3081              | 3.68712        | 64.7512           | 3.33129     | 68.3857           | 3.40491     |
+| Presentation         | 95.1562          | 4.13669    | 81.2261              | 4              | 83.6737           | 3.95683     | 84.8405           | 3.86331     |
+| Financial document   | 95.3697          | 4.39106    | 82.5812              | 4.16111        | 81.3115           | 4.05556     | 86.3882           | 3.8         |
+| Letter               | 98.4021          | 4.5        | 93.4477              | 4.28125        | 96.0383           | 4.45312     | 92.0952           | 4.09375     |
+| Engineering document | 93.9244          | 4.04412    | 77.4854              | 3.72059        | 80.3319           | 3.88235     | 79.6807           | 3.42647     |
+| Legal document       | 96.689           | 4.27759    | 86.9769              | 3.87584        | 91.601            | 4.20805     | 87.8383           | 3.65552     |
+| Newspaper page       | 98.8733          | 4.25806    | 84.7492              | 3.90323        | 96.9963           | 4.45161     | 92.6496           | 3.51613     |
+| Magazine page        | 98.2145          | 4.38776    | 87.2902              | 3.97959        | 93.5934           | 4.16327     | 93.0892           | 4.02041     |
+
+## Throughput
+
+We benchmarked throughput using a [single long PDF](https://www.greenteapress.com/thinkpython/thinkpython.pdf).
+
+| Method  | Time per page | Time per document | VRAM used |
+|---------|---------------|-------------------|---------- |
+| marker  | 0.18          | 43.42             |  3.17GB   |
+
+The projected throughput is 122 pages per second on an H100 - we can run 22 individual processes given the VRAM used.
+
+## Table Conversion
+
+Marker can extract tables from PDFs using `marker.converters.table.TableConverter`. The table extraction performance is measured by comparing the extracted HTML representation of tables against the original HTML representations using the test split of [FinTabNet](https://developer.ibm.com/exchanges/data/all/fintabnet/). The HTML representations are compared using a tree edit distance based metric to judge both structure and content. Marker detects and identifies the structure of all tables in a PDF page and achieves these scores:
+
+| Method           | Avg score | Total tables |
+|------------------|-----------|--------------|
+| marker           | 0.816     | 99           |
+| marker w/use_llm | 0.907     | 99           |
+| gemini           | 0.829     | 99           |
+
+The `--use_llm` flag can significantly improve table recognition performance, as you can see.
+
+We filter out tables that we cannot align with the ground truth, since fintabnet and our layout model have slightly different detection methods (this results in some tables being split/merged).
+
+## Running your own benchmarks
+
+You can benchmark the performance of marker on your machine. Install marker manually with:
+
+```shell
+git clone https://github.com/VikParuchuri/marker.git
+poetry install
+```
+
+### Overall PDF Conversion
+
+Download the benchmark data [here](https://drive.google.com/file/d/1ZSeWDo2g1y0BRLT7KnbmytV2bjWARWba/view?usp=sharing) and unzip. Then run the overall benchmark like this:
+
+```shell
+python benchmarks/overall.py --methods marker --scores heuristic,llm
+```
+
+Options:
+
+- `--use_llm` use an llm to improve the marker results.
+- `--max_rows` how many rows to process for the benchmark.
+- `--methods` can be `llamaparse`, `mathpix`, `docling`, `marker`.  Comma separated.
+- `--scores` which scoring functions to use, can be `llm`, `heuristic`.  Comma separated.
+
+### Table Conversion
+The processed FinTabNet dataset is hosted [here](https://huggingface.co/datasets/datalab-to/fintabnet-test) and is automatically downloaded. Run the benchmark with:
+
+```shell
+python benchmarks/table/table.py --max_rows 100
+```
+
+Options:
+
+- `--use_llm` uses an llm with marker to improve accuracy.
+- `--use_gemini` also benchmarks gemini 2.0 flash.
+
+# How it works
+
+Marker is a pipeline of deep learning models:
+
+- Extract text, OCR if necessary (heuristics, [surya](https://github.com/VikParuchuri/surya))
+- Detect page layout and find reading order ([surya](https://github.com/VikParuchuri/surya))
+- Clean and format each block (heuristics, [texify](https://github.com/VikParuchuri/texify), [surya](https://github.com/VikParuchuri/surya))
+- Optionally use an LLM to improve quality
+- Combine blocks and postprocess complete text
+
+It only uses models where necessary, which improves speed and accuracy.
+
+# Limitations
+
+PDF is a tricky format, so marker will not always work perfectly.  Here are some known limitations that are on the roadmap to address:
+
+- Very complex layouts, with nested tables and forms, may not work
+- Forms may not be rendered well
+
+Note: Passing the `--use_llm` and `--force_ocr` flags will mostly solve these issues.
+
+# Usage and Deployment Examples
+
+You can always run `marker` locally, but if you wanted to expose it as an API, we have a few options:
+- Our platform API which is powered by `marker` and `surya` and is easy to test out - it's free to sign up, and we'll include credits, [try it out here](https://datalab.to)
+- Our painless on-prem solution for commercial use, which you can [read about here](https://www.datalab.to/blog/self-serve-on-prem-licensing) and gives you privacy guarantees with high throughput inference optimizations.
+- [Deployment example with Modal](./examples/README_MODAL.md) that shows you how to deploy and access `marker` through a web endpoint using [`Modal`](https://modal.com). Modal is an AI compute platform that enables developers to deploy and scale models on GPUs in minutes.

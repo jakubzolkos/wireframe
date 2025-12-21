@@ -1,66 +1,95 @@
-# EDA Artifact Generation Backend
+# Backend Setup
 
-Automated KiCad Schematic and BOM Generation from PDF Datasheets using LangGraph multi-agent orchestration.
+This project uses [uv](https://github.com/astral-sh/uv) for fast Python package management and virtual environment handling.
 
-## Architecture
+## Local Development (Windows)
 
-This backend implements a cyclic multi-agent LangGraph system that processes PDF datasheets through seven orchestrated nodes:
+For local development on Windows, use a virtual environment to isolate dependencies.
 
-1. **Ingestion Supervisor** - Routes chunks to appropriate agents
-2. **Vision Agent** - Extracts netlist from schematic images
-3. **Constants Miner** - Extracts electrical characteristics from tables
-4. **Equation Extractor** - Extracts design equations from application notes
-5. **Math Engineer** - Generates Python code to solve equations
-6. **Executor** - Executes code in secure E2B sandbox
-7. **HITL Node** - Handles missing variable requests
+### Prerequisites
 
-## Setup
+Install `uv` (if not already installed):
 
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-2. Configure environment variables (copy `.env.example` to `.env`):
+Or with pip:
 ```bash
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/eda_db
-REDIS_URL=redis://localhost:6379/0
-OPENAI_API_KEY=sk-...
-E2B_API_KEY=...
-# ... other variables
+pip install uv
 ```
 
-3. Run database migrations:
+### Setup
+
+1. **Navigate to the backend directory:**
+   ```bash
+   cd backend
+   ```
+
+2. **Create and activate virtual environment with uv:**
+   ```bash
+   uv venv
+   .venv\Scripts\activate  # PowerShell
+   # or
+   .venv\Scripts\activate.bat  # CMD
+   ```
+
+3. **Install dependencies:**
+   ```bash
+   uv pip install -e .
+   ```
+
+   Or use uv's sync command (recommended):
+   ```bash
+   uv sync
+   ```
+
+## Docker Deployment
+
+For Docker deployment, the Dockerfile automatically uses `uv` to install dependencies. No virtual environment is needed since the container is isolated.
+
+The Dockerfile:
+- Uses `uv` for fast dependency installation
+- Installs from `pyproject.toml` (not `requirements.txt`)
+- Optimizes Docker layer caching by copying `pyproject.toml` first
+
+**Build and run:**
 ```bash
-alembic upgrade head
+docker build -t wireframe-backend .
+docker run -p 8000:8000 wireframe-backend
 ```
 
-4. Start the server:
+## Development Workflow
+
+- **Install a new package:**
+  ```bash
+  uv add package-name
+  ```
+
+- **Remove a package:**
+  ```bash
+  uv remove package-name
+  ```
+
+- **Update dependencies:**
+  ```bash
+  uv sync --upgrade
+  ```
+
+- **Run commands in the virtual environment:**
+  ```bash
+  uv run python script.py
+  uv run pytest
+  ```
+
+## Alternative: Manual Virtual Environment
+
+If you prefer to use Python's built-in venv:
+
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-## API Endpoints
-
-- `POST /analyze` - Upload and analyze a PDF datasheet
-- `GET /jobs/{job_id}` - Get job status and design data
-- `GET /jobs/{job_id}/stream` - Stream real-time processing updates (SSE)
-- `POST /jobs/{job_id}/resume` - Resume job with missing variables
-- `GET /jobs/{job_id}/artifacts/schematic.kicad_sch` - Download KiCad schematic
-- `GET /jobs/{job_id}/artifacts/bom.csv` - Download BOM CSV
-
-## Development
-
-- Linting: `ruff check .`
-- Formatting: `ruff format .`
-- Type checking: `mypy app`
-- Tests: `pytest`
-
-## Dependencies
-
-- FastAPI - Async web framework
-- LangGraph - Multi-agent orchestration
-- Marker-pdf - PDF parsing (primary)
-- E2B - Secure code execution sandbox
-- SQLAlchemy 2.0 - Async ORM
-- Pydantic V2 - Data validation

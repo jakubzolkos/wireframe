@@ -1,19 +1,3 @@
-from app.api.v2 import chips, importers, subscriptions, datasheets
-
-from fastapi import APIRouter
-
-api_router = APIRouter()
-
-api_router.include_router(chips.router, prefix="/chips", tags=["Chips"])
-api_router.include_router(importers.router, prefix="/import", tags=["Import"])
-api_router.include_router(subscriptions.router, prefix="/subscriptions", tags=["Subscriptions"])
-api_router.include_router(datasheets.router, prefix="/datasheets", tags=["Datasheets"])
-
-
-@api_router.get("/")
-def api_root():
-    return {"message": "You've reached the root of the backend api. Go to /docs for documentation."}
-
 from pathlib import Path
 
 import structlog
@@ -22,25 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v2.chips import router as chips_router
-from app.api.v2.importers import router as importers_router
-from app.api.v2.subscriptions import router as subscriptions_router
-from app.api.v2.datasheets import router as datasheets_router
-
-from fastapi import APIRouter
-
-api_router = APIRouter()
-
-api_router.include_router(chips_router, prefix="/chips", tags=["Chips"])
-api_router.include_router(importers_router, prefix="/import", tags=["Import"])
-api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["Subscriptions"])
-api_router.include_router(datasheets_router, prefix="/datasheets", tags=["Datasheets"])
-
-
-@api_router.get("/")
-def api_root():
-    return {"message": "You've reached the root of the backend api. Go to /docs for documentation."}
-
+from app.api.v1.chips import router as chips_router
+from app.api.v1.datasheets import router as datasheets_router
 
 # Setup structured logging
 structlog.configure(
@@ -78,7 +45,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router)
+app.include_router(chips_router, prefix="/chips", tags=["Chips"])
+app.include_router(datasheets_router, prefix="/datasheets", tags=["Datasheets"])
 
 @app.get("/health")
 async def health_check():

@@ -7,9 +7,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Wireframe"
     
     # Security / Auth (existing ones)
-    STRIPE_API_KEY: Optional[str] = None
     FRONTEND_URL: str = "http://localhost:3000"
-    STRIPE_WEBHOOK_SECRET: Optional[str] = None
     
     # External Services (existing ones)
     UL_CLIENT_ID: Optional[str] = None

@@ -1,4 +1,5 @@
 import os
+import json
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
 from marker.config.parser import ConfigParser
@@ -18,4 +19,6 @@ if __name__ == '__main__':
         llm_service=config_parser.get_llm_service()
     )
     rendered = converter("sheet.pdf")
-    print(rendered)
+    with open("sheet.json", "w", encoding="utf-8") as f:
+        json_string = rendered.model_dump_json(indent=2)
+        f.write(json_string)

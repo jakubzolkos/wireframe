@@ -13,6 +13,7 @@ services:
       - postgres
     volumes:
       - uploads_data:/tmp/uploads
+      - ./backend:/code
     environment:
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       UL_CLIENT_ID: ${UL_CLIENT_ID:-"autopcb_client"}
@@ -23,7 +24,7 @@ services:
       POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/wireframe
     ports:
       - 8080:8080
-    command: python3 -u app/main.py --headless
+    command: python3 -u -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
   worker:
     container_name: worker
@@ -37,6 +38,7 @@ services:
       - postgres
     volumes:
       - uploads_data:/tmp/uploads
+      - ./backend:/code
     environment:
       # Copy relevant env vars
       REDIS_URL: redis://redis:6379/0
@@ -46,7 +48,7 @@ services:
       DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID}
       DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET}
       # Marker settings (if needed)
-    command: python3 -m arq app.worker.WorkerSettings
+    command: python3 -m arq app.core.worker.WorkerSettings
 
   redis:
     image: redis:alpine

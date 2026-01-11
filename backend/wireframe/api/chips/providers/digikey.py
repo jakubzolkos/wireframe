@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 import structlog
-from app.core.config import settings
+from app.config import settings
 from app.core.models import ChipCategory, ChipFilterMultichoice, ChipFilterMultichoiceValue, ChipFilterPhysicalUnitRange, ChipSubcategoryInfo
 
 log = structlog.get_logger()

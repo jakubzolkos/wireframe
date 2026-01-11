@@ -83,8 +83,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-ins
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /code
+COPY pyproject.toml uv.lock ./
+RUN uv pip install --system --break-system-packages -e .
 COPY . .
-RUN uv pip install --system --no-cache --break-system-packages -e .
 
 EXPOSE 8080
 CMD ["python3", "-u", "/app/main.py", "--headless"]

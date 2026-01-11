@@ -6,8 +6,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1.chips import router as chips_router
-from app.api.v1.datasheets import router as datasheets_router
+from wireframe.api.ingestor.router import router as ingestor_router
+from wireframe.api.generator.router import router as generator_router
+from wireframe.api.auth.router import router as auth_router
+from wireframe.api.chips.router import router as chips_router
 
 # Setup structured logging
 structlog.configure(
@@ -45,8 +47,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(ingestor_router, prefix="/ingestor", tags=["Ingestor"])
+app.include_router(generator_router, prefix="/generator", tags=["Generator"])
+app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(chips_router, prefix="/chips", tags=["Chips"])
-app.include_router(datasheets_router, prefix="/datasheets", tags=["Datasheets"])
 
 @app.get("/health")
 async def health_check():
@@ -75,5 +79,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8080,
         reload=True,
-        workers=1, # Dev mode
+        workers=1, 
     )

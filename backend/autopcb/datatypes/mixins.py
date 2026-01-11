@@ -4,7 +4,7 @@ import re
 import dacite
 from pathlib import Path
 from typing_extensions import Self
-from autopcb.parsers.kicad.parser import parse_dataclass, parse_sexp, serialize_dataclass, to_sexp
+from autopcb.sexpr import parse_dataclass, parse_sexp, serialize_dataclass, to_sexp
 
 
 class DataclassSerializerMixin:

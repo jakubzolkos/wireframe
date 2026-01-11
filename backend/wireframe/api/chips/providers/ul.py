@@ -1,4 +1,5 @@
 import base64
+from dataclasses import dataclass
 import os
 import tempfile
 import time
@@ -6,16 +7,21 @@ from typing import Optional
 import zipfile
 
 import httpx
+from autopcb.datatypes.mixins import DataclassSerializerMixin
 import structlog
-from app.core.clients.cache import cache_returned_dataclass_to_disk
-from app.core.config import settings
+from app.config import settings
 from autopcb.datatypes.pcb import Footprint
-from autopcb.datatypes.schematics import SymbolLibrary
-from autopcb.models import ParsedChip
+from autopcb.datatypes.schematics import LibSymbol, SymbolLibrary
 
 log = structlog.get_logger()
 
 
+@dataclass
+class ParsedChip(DataclassSerializerMixin):
+    symbol: LibSymbol
+    # Optional for symbols like GND which don't have a footprint
+    footprint: Footprint | None = None
+    
 class UltraLibrarianClient:
     """Async Client for interacting with UltraLibrarian API"""
     
@@ -218,7 +224,6 @@ class UltraLibrarianClient:
         
         return response.json()
 
-    @cache_returned_dataclass_to_disk
     async def get_chip(self, uid: str) -> ParsedChip:
         """Get KiCad symbol file path from UltraLibrarian export endpoint"""
         response = await self._make_authenticated_request(

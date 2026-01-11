@@ -3,8 +3,6 @@ import sys
 from dataclasses import fields, is_dataclass, dataclass, MISSING
 from typing import List, Optional, Union, Tuple, get_origin, get_args, get_type_hints
 
-from autopcb.parsers.kicad.sexpr import parse_sexp
-
 POSITIONAL_FIELD_METADATA_FLAG = 'positional_flag'
 BOOLEAN_FLAG_ATTRIBUTE_METADATA_FLAG = 'flag_attribute'
 

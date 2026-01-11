@@ -8,7 +8,6 @@ from autopcb.datatypes.common import Margins, BoundingBox, Vector2D, Vector2DWit
 from autopcb.datatypes.fields import flag_boolean, positional
 from autopcb.datatypes.utils import get_arc_bounding_box, normalize_angle
 from autopcb.datatypes.mixins import DataclassSerializerMixin, SexprMixin
-from autopcb.parsers.kicad.sexpr import parse_sexp
 
 
 @dataclass(kw_only=True)

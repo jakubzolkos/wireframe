@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 import sys
 import json
@@ -6,15 +7,20 @@ from urllib.parse import unquote
 
 from pydantic import BaseModel
 
-from app.api.clients import get_ultralibrarian_client, get_digikey_client
+from app.core.clients import get_ultralibrarian_client, get_digikey_client
 
 from autopcb.datatypes.schematics import LibSymbol
 from autopcb.datatypes.pcb import Footprint
 from fastapi import APIRouter, HTTPException
 
 from autopcb.datatypes.templates import GNDSymbol, NetLabelSymbol, NoConnectSymbol, PowerSymbol
-from autopcb.models import ParsedChip
+from autopcb.datatypes.mixins import DataclassSerializerMixin
 
+@dataclass
+class ParsedChip(DataclassSerializerMixin):
+    symbol: LibSymbol
+    # Optional for symbols like GND which don't have a footprint
+    footprint: Footprint | None = None
 
 router = APIRouter()
 

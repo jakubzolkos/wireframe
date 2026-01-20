@@ -8,7 +8,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-engine = create_async_engine("postgresql://postgres:postgres@localhost:5432/wireframe", echo=True)
+from .config import settings
+
+engine = create_async_engine(settings.POSTGRES_URL, echo=True)
 AsyncSessionLocal = async_sessionmaker(engine, autoflush=False)
 
 async def get_session() -> AsyncIterator[async_sessionmaker]:
@@ -60,11 +62,5 @@ class CRUD:
     async def list(self, model: Type[Base]) -> list[Base]:
         result = await self.session.execute(
             select(model)
-        )
-        return result.scalars().all()
-
-    async def filter(self, model: Type[Base], **kwargs) -> list[Base]:
-        result = await self.session.execute(
-            select(model).where(**kwargs)
         )
         return result.scalars().all()

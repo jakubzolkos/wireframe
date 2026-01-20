@@ -7,8 +7,9 @@ from typing import Any
 
 import httpx
 import structlog
-from app.config import settings
-from app.core.models import ChipCategory, ChipFilterMultichoice, ChipFilterMultichoiceValue, ChipFilterPhysicalUnitRange, ChipSubcategoryInfo
+from wireframe.api.chips.schemas import *
+from wireframe.config import settings
+# from wireframe.schemas import ChipCategory, ChipFilterMultichoice, ChipFilterMultichoiceValue, ChipFilterPhysicalUnitRange, ChipSubcategoryInfo
 
 log = structlog.get_logger()
 
@@ -634,3 +635,7 @@ class DigiKeyClient:
                     )
 
         return filter_configs
+
+
+def get_digikey_client() -> DigiKeyClient:
+    return DigiKeyClient()

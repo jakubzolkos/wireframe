@@ -21,10 +21,11 @@ services:
       DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID}
       DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET}
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/wireframe
+      POSTGRES_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wireframe
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:
       - 8080:8080
-    command: python3 -u -m uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    command: python3 -u -m uvicorn wireframe.main:app --host 0.0.0.0 --port 8080 --reload
 
   worker:
     container_name: worker
@@ -42,13 +43,14 @@ services:
     environment:
       # Copy relevant env vars
       REDIS_URL: redis://redis:6379/0
-      POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/wireframe
+      POSTGRES_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/wireframe
       UL_CLIENT_ID: ${UL_CLIENT_ID:-"autopcb_client"}
       UL_CLIENT_SECRET: ${UL_CLIENT_SECRET}
       DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID}
       DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
       # Marker settings (if needed)
-    command: python3 -m arq app.core.worker.WorkerSettings
+    command: python3 -m arq wireframe.worker.WorkerSettings
 
   redis:
     image: redis:alpine

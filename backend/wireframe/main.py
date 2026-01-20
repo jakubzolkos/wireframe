@@ -1,4 +1,5 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 import structlog
 import uvicorn
@@ -10,6 +11,8 @@ from wireframe.api.ingestor.router import router as ingestor_router
 from wireframe.api.generator.router import router as generator_router
 from wireframe.api.auth.router import router as auth_router
 from wireframe.api.chips.router import router as chips_router
+from wireframe.api.jobs.router import router as jobs_router
+from wireframe.utils.redis import get_redis_pool
 
 # Setup structured logging
 structlog.configure(
@@ -24,9 +27,16 @@ structlog.configure(
 
 log = structlog.get_logger()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.arq_pool = await get_redis_pool()
+    yield
+    await app.state.arq_pool.close()
+
 app = FastAPI(
     title="Wireframe Backend", 
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # CORS Configuration
@@ -51,10 +61,12 @@ app.include_router(ingestor_router, prefix="/ingestor", tags=["Ingestor"])
 app.include_router(generator_router, prefix="/generator", tags=["Generator"])
 app.include_router(auth_router, prefix="/auth", tags=["Auth"])
 app.include_router(chips_router, prefix="/chips", tags=["Chips"])
+app.include_router(jobs_router, prefix="/jobs", tags=["Jobs"])
 
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
+
 
 class NoCacheStaticFiles(StaticFiles):
     def __init__(self, *args, **kwargs):
@@ -75,7 +87,7 @@ if static_dir.exists():
 
 if __name__ == "__main__":
     uvicorn.run(
-        "app.main:app",
+        "wireframe.main:app",
         host="0.0.0.0",
         port=8080,
         reload=True,

@@ -9,7 +9,7 @@ import zipfile
 import httpx
 from autopcb.datatypes.mixins import DataclassSerializerMixin
 import structlog
-from app.config import settings
+from wireframe.config import settings
 from autopcb.datatypes.pcb import Footprint
 from autopcb.datatypes.schematics import LibSymbol, SymbolLibrary
 
@@ -288,3 +288,6 @@ class UltraLibrarianClient:
                 symbol=chip_symbol,
                 footprint=footprint
             )
+
+def get_ultralibrarian_client() -> UltraLibrarianClient:
+    return UltraLibrarianClient()

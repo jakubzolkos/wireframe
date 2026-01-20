@@ -7,7 +7,8 @@ from urllib.parse import unquote
 
 from pydantic import BaseModel
 
-from app.core.clients import get_ultralibrarian_client, get_digikey_client
+from wireframe.api.chips.providers.ul import get_ultralibrarian_client
+from wireframe.api.chips.providers.digikey import get_digikey_client
 
 from autopcb.datatypes.schematics import LibSymbol
 from autopcb.datatypes.pcb import Footprint

@@ -1,97 +1,129 @@
-import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List
+from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
 
 from wireframe.config import settings
+from wireframe.agents.state import ImageCandidate
 
 logger = logging.getLogger(__name__)
 
+# --- Pydantic Schemas for LLM Responses ---
+
+class SectionRelevance(BaseModel):
+    relevant_section_headers: List[str] = Field(
+        description="List of exact headers from the provided list that are likely to contain schematic diagrams or reference designs."
+    )
+
+class SchematicClassification(BaseModel):
+    is_reference_design: bool = Field(
+        description="True if the image is an electronic schematic or reference design wiring diagram."
+    )
+    reasoning: str = Field(description="Short explanation of the classification.")
+
+# ------------------------------------------
+
 class LLMService:
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize the Gemini client.
-        Ensure GEMINI_API_KEY is set in your environment variables.
-        """
-        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        self.model_name = "gemini-3-flash-preview"
+    def __init__(self):
+        self.client = genai.Client(api_key='AIzaSyCz4IF-CYow-qkfLwoehCcb2GeoSUL5LMQ')
+        self.model_name = "gemini-2.0-flash" # Updated to latest efficient model
 
-
-    async def identify_schematics(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def identify_relevant_sections(self, headers: List[str]) -> SectionRelevance:
         """
-        Iterates through candidates and checks if they are schematics.
-        """        
+        Analyzes a list of section headers to find those relevant for schematics.
+        """
+        if not headers:
+            logger.warning("No headers provided for analysis.")
+            return SectionRelevance(relevant_section_headers=[])
+
+        prompt_text = f"""
+        You are an expert electronics engineer analyzing a datasheet structure.
+        
+        Here is a list of section headers from a chip datasheet:
+        {headers}
+        
+        Identify which of these sections are most likely to contain "Reference Designs", 
+        "Typical Applications", "Schematics", or "Application Circuits".
+        
+        Return ONLY the list of exact header strings that are relevant.
+        """
+        
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt_text,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=SectionRelevance,
+                    temperature=0.0
+                )
+            )
+            
+            if response.parsed:
+                return response.parsed
+            return SectionRelevance(relevant_section_headers=[])
+            
+        except Exception as e:
+            logger.error(f"Failed to identify sections: {e}")
+            return SectionRelevance(relevant_section_headers=[])
+
+    async def identify_schematics(self, candidates: List[ImageCandidate]) -> List[ImageCandidate]:
+        """
+        Classifies images using structured Pydantic outputs.
+        """
         confirmed = []
-        print(f"LLM classifying {len(candidates)} images...")
+        logger.info(f"LLM classifying {len(candidates)} images...")
 
         for item in candidates:
-            is_schematic = await self._classify_single(item["image"], item.get("context", {}))
+            classification = await self._classify_single(item)
             
-            if is_schematic:
-                print(f"Image {item.get('id')} CONFIRMED as reference design.")
+            if classification.is_reference_design:
+                logger.info(f"Image {item.id} CONFIRMED: {classification.reasoning}")
                 confirmed.append(item)
             else:
-                print(f"Image {item.get('id')} rejected.")
+                logger.debug(f"Image {item.id} rejected: {classification.reasoning}")
                 
         return confirmed
 
-    async def _classify_single(self, image: bytes, context: dict) -> bool:
-        """
-        Sends the image and context to Gemini to determine if it's a schematic.
-        """
+    async def _classify_single(self, item: ImageCandidate) -> SchematicClassification:
         try:
-            caption = context.get("caption", "No context provided.")
-
-            # 1. Define the Prompt
             prompt_text = f"""
-            You are an expert electronics engineer.
-            Context for this image: "{caption}"
+            Context: This image was found in the section "{item.section_title}".
+            Caption: "{item.caption or ''}"
 
-            Analyze the image provided. Determine if this image represents an 
-            "Electronic Circuit Schematic" or a "Reference Design Wiring Diagram".
-
+            Analyze this image. Is it an "Electronic Circuit Schematic" or "Reference Design"?
+            
             Criteria for YES:
-            - Contains standard electronic symbols (resistors, capacitors, ICs).
-            - Shows connections/wires between components.
-            - Represents a functional circuit.
-
+            - Standard electronic symbols (resistors, ICs, GND).
+            - Wires connecting components.
+            
             Criteria for NO:
-            - It is a block diagram (boxes with arrows, no component symbols).
-            - It is a PCB layout footprint or package dimension drawing.
-            - It is a timing diagram or graph.
-            - It is a company logo or decorative icon.
-
-            Answer with a JSON object: {{"is_reference_design": boolean, "reasoning": "string"}}
+            - Block diagrams (boxes only).
+            - PCB Footprints/Package dimensions.
+            - Tables or Graphs.
             """
 
-            # 2. Call Gemini
-            # Note: The SDK supports passing PIL Images directly
-            image = types.Part.from_bytes(
-                data=image, mime_type="image/png"
+            image_part = types.Part.from_bytes(
+                data=item.image, mime_type="image/png"
             )
+            
             response = self.client.models.generate_content(
                 model=self.model_name,
-                contents=[
-                    prompt_text,
-                    image
-                ],
+                contents=[prompt_text, image_part],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    temperature=0.0  # Deterministic output
+                    response_schema=SchematicClassification,
+                    temperature=0.0
                 )
             )
 
-            # 3. Parse Response
-            if not response.text:
-                print("Empty response from Gemini.")
-                return False
-
-            result = json.loads(response.text)
-            return result.get("is_reference_design", False)
+            if response.parsed:
+                return response.parsed
+            
+            return SchematicClassification(is_reference_design=False, reasoning="Model returned no parsed response.")
 
         except Exception as e:
-            print(f"LLM Classification failed: {e}")
-            # Fail safe: if LLM crashes, assume False to avoid garbage data
-            return False
+            logger.error(f"Classification failed for {item.id}: {e}")
+            return SchematicClassification(is_reference_design=False, reasoning="Error during classification.")

@@ -16,11 +16,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/use-auth';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { logout } = useAuth();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,7 +45,7 @@ const Dashboard = () => {
   };
 
   const handleSignOut = async () => {
-    await signOut();
+    await logout();
     toast.success('Signed out successfully');
     navigate('/');
   };

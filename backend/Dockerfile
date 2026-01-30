@@ -1,91 +1,53 @@
-FROM ubuntu:noble
 
-# Install KiCad build dependencies
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends \
-    # Build tools
-    build-essential \
-    cmake \
-    cmake-curses-gui \
-    ninja-build \
-    ccache \
-    pkg-config \
-    git \
-    # Compilers and linkers
-    clang \
-    lld \
-    mold \
-    # KiCad build dependencies from Build-Depends
-    libbz2-dev \
-    libcairo2-dev \
-    libglu1-mesa-dev \
-    libgl1-mesa-dev \
-    libglew-dev \
-    libx11-dev \
-    libwxgtk3.2-dev \
-    libwxgtk-webview3.2-dev \
-    mesa-common-dev \
-    libssl-dev \
-    libzstd-dev \
-    python3-dev \
-    swig \
-    python3-wxgtk4.0 \
-    libgit2-dev \
-    libsecret-1-dev \
-    libboost-all-dev \
-    libglm-dev \
-    libcurl4-openssl-dev \
-    libgtk-3-dev \
-    libngspice0-dev \
-    libocct-modeling-algorithms-dev \
-    libocct-modeling-data-dev \
-    libocct-data-exchange-dev \
-    libocct-visualization-dev \
-    libocct-foundation-dev \
-    libocct-ocaf-dev \
-    unixodbc-dev \
-    libspnav-dev \
-    libnng-dev \
-    libprotobuf-dev \
-    protobuf-compiler \
-    zlib1g-dev \
-    shared-mime-info \
-    python3-pytest \
-    python3-cairosvg \
-    python3-numpy \
-    libzint-dev \
-    libpoppler-dev \
-    libpoppler-glib-dev \
-    doxygen \
-    dblatex \
-    po4a \
-    asciidoc \
-    source-highlight \
-    # EGL/OpenGL dependencies
-    libegl1-mesa-dev \
-    libgles2-mesa-dev \
-    # System dependencies
-    zip \
-    npm \
-    nano \
-    openjdk-17-jdk \
-    python3-tk \
-    procps \
-    software-properties-common \
-    xclip \
-    gpg-agent \
-    dirmngr \
-    unzip \
-    xdotool \
-    imagemagick \
-    python3-pip \
-    xvfb \
-    && apt-get clean
+# Build stage
+FROM python:3.12-slim AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-WORKDIR /code
-COPY pyproject.toml uv.lock ./
-RUN uv pip install --system --break-system-packages -e .
-COPY . .
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+
+# Install dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --no-dev
+
+# Copy application
+COPY . /app
+
+# Install project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+
+# Runtime stage
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app /app
+
+# Add venv to path
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Create non-root user
+RUN adduser --disabled-password --gecos "" appuser && \
+    chown -R appuser:appuser /app
+USER appuser
 
 EXPOSE 8080
-CMD ["python3", "-u", "/app/main.py", "--headless"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8080/api/v1/health')" || exit 1
+
+CMD ["python", "-m", "cli.commands", "server", "run", "--host", "0.0.0.0", "--port", "8080"]

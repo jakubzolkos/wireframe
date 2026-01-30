@@ -1,43 +1,98 @@
+[project]
+name = "wireframe"
+version = "0.1.0"
+description = "Agentic parser and EDA tool for integrated circuit reference designs"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Jakub Zolkos", email = "jb.zolkos@gmail.com" }]
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic[email]>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "orjson>=3.10.0",
+    "logfire[fastapi,asyncpg]>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "psycopg2-binary>=2.9.0",
+    "alembic>=1.14.0",
+    "greenlet>=3.0.0",
+    "pyjwt>=2.9.0",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.12",
+    "redis>=5.2.0",
+    "fastapi-cache2>=0.2.2",
+    "slowapi>=0.1.9",
+    "fastapi-pagination>=0.12.31",
+    "sentry-sdk[fastapi]>=2.18.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "sqladmin>=0.19.0",
+    "taskiq>=0.11.0",
+    "taskiq-redis>=1.0.0",
+    "taskiq-dependencies>=0.1.0",
+    "boto3>=1.35.0",
+    "pydantic-ai>=0.0.39",
+    "httpx>=0.27.0",
+    "click>=8.1.0",
+    "tabulate>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "anyio[trio]>=4.0.0",
+    "pytest-cov>=6.0.0",
+    "httpx>=0.27.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+]
+
+[project.scripts]
+wireframe = "cli.commands:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[project]
-name = "wireframe"
-version = "0.1.0"
-requires-python = ">=3.12"
-dependencies = [
-    "fastapi[standard]",
-    "pydantic>=2.9",
-    "pydantic-settings>=2.0",
-    "langgraph>=0.2",
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg",
-    "structlog",
-    "httpx",
-    "marker-pdf",
-    "kicad-sch-api",
-    "vcrpy",
-    "openai>=1.0",
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
-    "arq>=0.25",
-    "redis>=5.0",
-    "instructor>=1.0",
-    "langgraph-checkpoint-postgres>=1.0",
-    "psycopg[binary]>=3.1",
-    "dacite>=1.8",
-    "docling",
-    "psycopg2-binary",
-]
-
 [tool.hatch.build.targets.wheel]
-packages = ["wireframe"]
+packages = ["app", "cli"]
 
 [tool.ruff]
+target-version = "py311"
 line-length = 100
-target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "B", "I", "UP", "N", "S", "PLE", "PLW", "RUF", "TID"]
-ignore = []
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default argument (needed for FastAPI Depends)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "cli"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.fastapi-fullstack]
+generator_version = "0.1.16"
+generated_at = "2026-01-23T02:02:07.033820+00:00"

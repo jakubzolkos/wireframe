@@ -1,52 +1,57 @@
-# Virtual environments
-.venv/
-venv/
-env/
-ENV/
 
-# Python cache
-__pycache__/
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
 *.py[cod]
 *$py.class
 *.so
 .Python
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-*.egg-info/
-dist/
-build/
+.venv
+venv/
+ENV/
 
 # IDE
-.vscode/
-.idea/
+.idea
+.vscode
 *.swp
 *.swo
-*~
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment files
-.env
-.env.local
-
-# Git
-.git/
-.gitignore
+# Testing
+.pytest_cache
+.coverage
+htmlcov/
+.tox
+.nox
 
 # Documentation
+docs/_build/
 *.md
-README.md
+!README.md
 
-# Development scripts
-setup.ps1
-setup.sh
+# Build artifacts
+dist/
+build/
+*.egg-info/
 
-# Python version file (not needed in Docker)
-.python-version
+# Development files
+.env
+.env.local
+*.db
+*.sqlite
 
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker
 
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log

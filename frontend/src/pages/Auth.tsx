@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Cpu, ArrowRight, Zap, FileText, Database, Loader2 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
 import { z } from 'zod';
 
@@ -17,12 +17,13 @@ const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-  
+  const [errors, setErrors] = useState<{ email?: string; password?: string; fullName?: string }>({});
+
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn, signUp, user, isLoading } = useAuth();
+  const { login, register, user, isLoading } = useAuth();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
 
@@ -49,48 +50,53 @@ const Auth = () => {
       return;
     }
 
+    if (!isLogin && !fullName.trim()) {
+      setErrors({ fullName: 'Full name is required' });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       if (isLogin) {
-        const { error } = await signIn(email, password);
-        if (error) {
-          if (error.message.includes('Invalid login credentials')) {
-            toast.error('Invalid credentials', {
-              description: 'Please check your email and password.',
-            });
-          } else {
-            toast.error('Sign in failed', {
-              description: error.message,
-            });
-          }
+        await login({ email, password });
+        toast.success('Welcome back!');
+      } else {
+        console.log('Registering with:', { email, full_name: fullName });
+        const result = await register({ email, password, full_name: fullName });
+        console.log('Registration successful:', result);
+        toast.success('Account created!', {
+          description: 'Please sign in with your new account.',
+        });
+        // Switch to login mode after successful registration
+        setIsLogin(true);
+        setPassword('');
+      }
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      const errorMessage = error?.message || error?.toString() || 'Something went wrong';
+
+      if (isLogin) {
+        if (errorMessage.includes('Invalid') || errorMessage.includes('credentials')) {
+          toast.error('Invalid credentials', {
+            description: 'Please check your email and password.',
+          });
         } else {
-          toast.success('Welcome back!');
-          navigate(from, { replace: true });
+          toast.error('Sign in failed', {
+            description: errorMessage,
+          });
         }
       } else {
-        const { error } = await signUp(email, password);
-        if (error) {
-          if (error.message.includes('already registered')) {
-            toast.error('Account exists', {
-              description: 'This email is already registered. Try signing in instead.',
-            });
-          } else {
-            toast.error('Sign up failed', {
-              description: error.message,
-            });
-          }
-        } else {
-          toast.success('Account created!', {
-            description: 'You can now access your dashboard.',
+        if (errorMessage.includes('already') || errorMessage.includes('exists') || errorMessage.includes('UNIQUE constraint')) {
+          toast.error('Account exists', {
+            description: 'This email is already registered. Try signing in instead.',
           });
-          navigate(from, { replace: true });
+        } else {
+          toast.error('Sign up failed', {
+            description: errorMessage,
+          });
         }
       }
-    } catch (err) {
-      toast.error('Something went wrong', {
-        description: 'Please try again later.',
-      });
     } finally {
       setIsSubmitting(false);
     }
@@ -110,7 +116,7 @@ const Auth = () => {
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid-pattern opacity-30" />
         <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/10" />
-        
+
         <div className="relative z-10 flex flex-col justify-center px-16 xl:px-24">
           <div className="flex items-center gap-3 mb-8">
             <div className="p-3 rounded-xl bg-primary/10 border border-primary/30 glow-primary">
@@ -118,14 +124,14 @@ const Auth = () => {
             </div>
             <span className="text-2xl font-semibold tracking-tight">SchematicAI</span>
           </div>
-          
+
           <h1 className="text-4xl xl:text-5xl font-bold leading-tight mb-6">
             Transform Datasheets into
             <span className="text-gradient block mt-2">Production-Ready Designs</span>
           </h1>
-          
+
           <p className="text-lg text-muted-foreground mb-12 max-w-md">
-            Upload IC datasheets and get KiCad schematics with accurate BOMs. 
+            Upload IC datasheets and get KiCad schematics with accurate BOMs.
             Powered by advanced AI that understands reference designs.
           </p>
 
@@ -135,7 +141,7 @@ const Auth = () => {
               { icon: Zap, text: 'Generate KiCad-compatible schematics' },
               { icon: Database, text: 'Accurate BOM with manufacturer PNs' },
             ].map((feature, index) => (
-              <div 
+              <div
                 key={index}
                 className="flex items-center gap-4 text-muted-foreground animate-fade-in"
                 style={{ animationDelay: `${index * 150}ms` }}
@@ -167,13 +173,31 @@ const Auth = () => {
                 {isLogin ? 'Welcome back' : 'Create account'}
               </h2>
               <p className="text-muted-foreground">
-                {isLogin 
-                  ? 'Sign in to access your designs' 
+                {isLogin
+                  ? 'Sign in to access your designs'
                   : 'Start converting datasheets today'}
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
+              {!isLogin && (
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name</Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    placeholder="John Doe"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className={`h-12 bg-secondary border-border focus:border-primary focus:ring-primary ${errors.fullName ? 'border-destructive' : ''}`}
+                    disabled={isSubmitting}
+                  />
+                  {errors.fullName && (
+                    <p className="text-sm text-destructive">{errors.fullName}</p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
                 <Input

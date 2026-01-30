@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(for file in wireframe/frontend/src/stores/*.ts wireframe/frontend/src/hooks/*.ts)",
+      "Bash(do sed -i '1{/^\"\"use client\"\";$/d;}' \"$file\")",
+      "Bash(done)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
